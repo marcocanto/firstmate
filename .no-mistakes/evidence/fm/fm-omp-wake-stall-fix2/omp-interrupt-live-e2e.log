@@ -1,0 +1,4 @@
+# escape precondition held: composer=pending, 3 durable rows
+ok - live omp interrupt recovery (escape): omp omp/18.3.0 (openai-codex/gpt-6-astra) through Herdr drained the wake with no further key and left an empty composer in isolated session fm-lab-omp-interrupt-13265-22170
+# enter precondition held: composer=empty, 3 durable rows
+ok - live omp interrupt recovery (enter): omp omp/18.3.0 (openai-codex/gpt-6-astra) through Herdr drained the wake with no further key and left an empty composer in isolated session fm-lab-omp-interrupt-13265-22170
