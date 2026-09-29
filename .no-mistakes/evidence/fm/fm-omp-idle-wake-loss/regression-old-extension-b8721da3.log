@@ -1,0 +1,9 @@
+not ok - omp watch extension idle delivery: file:///private/tmp/fm-regress.2KL6/[eval1]:62
+  throw new Error(`${what}; turns ${JSON.stringify(turns)}, queued follow-ups ${JSON.stringify(followUps)}, interruptions ${JSON.stringify(interruptions)}`);
+        ^
+
+Error: idle wake 1 never started a turn; turns ["captain: what is the fleet doing?"], queued follow-ups ["⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: omp-idle wake 1\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned."], interruptions []
+    at waitFor (file:///private/tmp/fm-regress.2KL6/[eval1]:62:9)
+    at async file:///private/tmp/fm-regress.2KL6/[eval1]:75:3
+
+Node.js v22.19.0: expected exit 0, got 1

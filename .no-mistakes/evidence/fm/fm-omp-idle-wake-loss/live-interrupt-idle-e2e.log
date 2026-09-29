@@ -1,0 +1,8 @@
+# escape precondition held: composer=pending, 3 durable rows
+ok - live omp interrupt recovery (escape): omp omp/18.4.3 (openai-codex/gpt-6-astra) through Herdr drained the wake with no further key and left an empty composer in isolated session fm-lab-omp-idle-gate-65195-5103
+# enter precondition held: composer=empty, 3 durable rows
+ok - live omp interrupt recovery (enter): omp omp/18.4.3 (openai-codex/gpt-6-astra) through Herdr drained the wake with no further key and left an empty composer in isolated session fm-lab-omp-idle-gate-65195-5103
+# idle precondition held: idle=true last=custom_message/advisor
+# idle wake started a turn 6s after its status line
+ok - live omp idle delivery: omp omp/18.4.3 (openai-codex/gpt-6-astra) through Herdr started a turn for a wake after 190s idle behind an advisor note, and a mid-run wake followed the run's final reply, in isolated session fm-lab-omp-idle-gate-65195-5103
+exit=0

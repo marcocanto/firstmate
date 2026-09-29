@@ -1,0 +1,9 @@
+not ok - omp watch extension idle delivery: file:///private/tmp/fm-regress.Mx6U/[eval1]:62
+  throw new Error(`${what}; turns ${JSON.stringify(turns)}, queued follow-ups ${JSON.stringify(followUps)}, interruptions ${JSON.stringify(interruptions)}`);
+        ^
+
+Error: a wake queued while omp settled never started a turn; turns ["captain: what is the fleet doing?","⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: omp-idle wake 1\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.","⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: omp-idle wake 2\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.","captain: a long task","⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: omp-idle wake 3\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.","captain: one more question"], queued follow-ups ["⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: omp-idle wake 4\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned."], interruptions []
+    at waitFor (file:///private/tmp/fm-regress.Mx6U/[eval1]:62:9)
+    at async file:///private/tmp/fm-regress.Mx6U/[eval1]:97:1
+
+Node.js v22.19.0: expected exit 0, got 1
