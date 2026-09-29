@@ -169,7 +169,11 @@
 #   profile consultation. A --secondmate spawn is exempt and resolves the SECONDMATE
 #   harness (config/secondmate-harness -> config/crew-harness -> own), so the
 #   secondmate-vs-crewmate split is DURABLE across every respawn (recovery,
-#   /updatefirstmate, restart). A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin)
+#   /updatefirstmate, restart). A REMOTE route that already has a record is the
+#   exception: it reuses the harness, model, and effort that record names, so it
+#   recovers on the runtime it was launched or last relaunched with, and only a
+#   new route resolves config/secondmate-harness.
+#   A bare adapter name (claude|codex|opencode|pi|pi-signed|grok|kimi|cursor|gemini|muse|rovo|omp|agy|devin)
 #   overrides it for this spawn (either kind). A non-flag string containing
 #   whitespace is treated as a RAW launch command - the escape hatch for verifying
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
@@ -214,7 +218,9 @@
 #   defaults unless the caller also passes explicit --model/--effort flags. When
 #   the file governs the spawn, its model/effort tokens are re-resolved on every
 #   respawn exactly like the harness axis, and explicit --model/--effort flags
-#   still win over the file's tokens.
+#   still win over the file's tokens. The file never governs a respawn of a
+#   REMOTE route that already has a record: that route reuses its recorded
+#   model and effort along with its harness.
 #   A --secondmate spawn also propagates the primary's declared inherited local
 #   material, so the secondmate's OWN crewmates inherit primary config and the
 #   secondmate receives the primary's read-only shared captain-preference file
@@ -887,6 +893,7 @@ spawn_remote_secondmate() {
   local id=$1 remote host root home harness positional model effort backend out rc meta tmp
   local remote_backend remote_target remote_harness remote_herdr_session registry_lock remote_lock remote_generation
   local remote_traceparent remote_recorded_traceparent sm_primary_head sync_out sync_rc
+  local recorded_harness recorded_model recorded_effort route_recorded
   local -a launch_args
   id=${POS[0]:-}
   fm_task_id_creation_valid "$id" || {
@@ -924,15 +931,53 @@ spawn_remote_secondmate() {
     echo "error: remote secondmate spawn accepts no local home positional argument" >&2
     return 2
   fi
+  meta="$STATE/$id.meta"
+  route_recorded=0
+  recorded_harness=
+  recorded_model=
+  recorded_effort=
+  if [ -e "$meta" ] || [ -L "$meta" ]; then
+    if ! fm_backlog_record_present "$meta" "task record" "$STATE" ||
+      [ "$(fm_meta_get "$meta" kind)" != secondmate ] ||
+      [ "$(fm_meta_get "$meta" remote_host)" != "$host" ] ||
+      [ "$(fm_meta_get "$meta" remote_root)" != "$root" ] ||
+      [ "$(fm_meta_get "$meta" home)" != "$home" ]; then
+      fm_lock_release "$registry_lock" || true
+      fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: existing metadata for $id does not identify this remote secondmate route" >&2
+      return 1
+    fi
+    route_recorded=1
+    recorded_harness=$(fm_meta_get "$meta" harness)
+    recorded_model=$(fm_meta_get "$meta" model)
+    recorded_effort=$(fm_meta_get "$meta" effort)
+  fi
+  # An existing route keeps the runtime it was launched or last relaunched
+  # with (bin/fm-remote-secondmate-relaunch.sh republishes this record), so a
+  # recovery or restart with no explicit runtime reuses that record instead of
+  # re-resolving this home's config: the primary's pin may name a different
+  # runtime than the one the route runs, and re-resolving would move the mate
+  # silently. A record that names no harness is refused for the same reason.
+  # Only a new route resolves config/secondmate-harness. An explicit --harness
+  # or positional harness still wins, and explicit --model/--effort still
+  # override the recorded axes.
   if [ -n "$HARNESS_ARG" ]; then
     harness=$HARNESS_ARG
   elif [ -n "$positional" ]; then
     harness=$positional
+  elif [ "$route_recorded" -eq 1 ]; then
+    if [ -z "$recorded_harness" ]; then
+      fm_lock_release "$registry_lock" || true
+      fm_lock_release "$SPAWN_TASK_LOCK" || true
+      echo "error: remote secondmate $id's route record names no harness; pass --harness to choose its runtime deliberately" >&2
+      return 1
+    fi
+    harness=$recorded_harness
   else
     harness=$("$FM_ROOT/bin/fm-harness.sh" secondmate)
   fi
   case "$harness" in
-  claude | codex | opencode | pi | pi-signed | grok | kimi | cursor) ;;
+  claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | omp) ;;
   *)
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true
@@ -943,13 +988,18 @@ spawn_remote_secondmate() {
   model=${MODEL:--}
   effort=${EFFORT:--}
   if [ -z "$HARNESS_ARG" ] && [ -z "$positional" ]; then
-    if [ "$MODEL_SET" -eq 0 ]; then
-      model=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model)
-      [ -n "$model" ] || model=-
-    fi
-    if [ "$EFFORT_SET" -eq 0 ]; then
-      effort=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort)
-      [ -n "$effort" ] || effort=-
+    if [ "$route_recorded" -eq 1 ]; then
+      [ "$MODEL_SET" -eq 1 ] || model=${recorded_model:--}
+      [ "$EFFORT_SET" -eq 1 ] || effort=${recorded_effort:--}
+    else
+      if [ "$MODEL_SET" -eq 0 ]; then
+        model=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model)
+        [ -n "$model" ] || model=-
+      fi
+      if [ "$EFFORT_SET" -eq 0 ]; then
+        effort=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort)
+        [ -n "$effort" ] || effort=-
+      fi
     fi
   fi
   # A remote second mate always runs on Herdr: its server belongs to the host's
@@ -979,25 +1029,12 @@ spawn_remote_secondmate() {
     fm_lock_release "$SPAWN_TASK_LOCK" || true
     return 1
   fi
-  meta="$STATE/$id.meta"
-  if [ -e "$meta" ] || [ -L "$meta" ]; then
-    if ! fm_backlog_record_present "$meta" "task record" "$STATE" ||
-      [ "$(fm_meta_get "$meta" kind)" != secondmate ] ||
-      [ "$(fm_meta_get "$meta" remote_host)" != "$host" ] ||
-      [ "$(fm_meta_get "$meta" remote_root)" != "$root" ] ||
-      [ "$(fm_meta_get "$meta" home)" != "$home" ]; then
-      fm_lock_release "$registry_lock" || true
-      fm_lock_release "$SPAWN_TASK_LOCK" || true
-      echo "error: existing metadata for $id does not identify this remote secondmate route" >&2
-      return 1
-    fi
-  fi
   # Gate the host before anything is published or transferred, so a host that
   # cannot hold a durable Herdr endpoint refuses here rather than half-way
   # through a launch. This is also the readiness gate every liveness relaunch
   # passes through, because recovery respawns through this same route.
   rc=0
-  fm_remote_readiness_ensure "$SCRIPT_DIR" "$id" || rc=$?
+  fm_remote_readiness_ensure "$SCRIPT_DIR" "$id" "$harness" || rc=$?
   if [ "$rc" -ne 0 ]; then
     fm_lock_release "$registry_lock" || true
     fm_lock_release "$SPAWN_TASK_LOCK" || true

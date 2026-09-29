@@ -123,6 +123,24 @@ assert_grep 'window=remote:ios' "$HOME_DIR/state/ios.meta" \
   "unrelated identity fields must survive the update"
 pass "a successful remote relaunch republishes the parent's harness, model, and effort"
 
+# --- a live route moves claude -> omp -> claude, one record line per axis ---
+reset_meta
+OUT=$(run_relaunch ios claude claude-opus-5-5 medium); RC=$?
+expect_code 0 "$RC" "the relaunch onto claude should succeed"$'\n'"$OUT"
+OUT=$(run_relaunch ios omp anthropic/claude-opus-5-5 high); RC=$?
+expect_code 0 "$RC" "the relaunch from claude onto omp should succeed"$'\n'"$OUT"
+assert_grep 'harness=omp' "$HOME_DIR/state/ios.meta" "the parent record did not follow the route onto omp"
+assert_grep 'model=anthropic/claude-opus-5-5' "$HOME_DIR/state/ios.meta" "the parent record lost the omp model"
+assert_grep 'effort=high' "$HOME_DIR/state/ios.meta" "the parent record lost the omp effort"
+OUT=$(run_relaunch ios claude claude-opus-5-5 medium); RC=$?
+expect_code 0 "$RC" "the relaunch from omp back onto claude should succeed"$'\n'"$OUT"
+assert_grep 'harness=claude' "$HOME_DIR/state/ios.meta" "the parent record did not follow the route back onto claude"
+[ "$(grep -c '^harness=' "$HOME_DIR/state/ios.meta")" -eq 1 ] \
+  && [ "$(grep -c '^model=' "$HOME_DIR/state/ios.meta")" -eq 1 ] \
+  && [ "$(grep -c '^effort=' "$HOME_DIR/state/ios.meta")" -eq 1 ] \
+  || fail "repeated relaunches left more than one harness, model, or effort line"$'\n'"$(cat "$HOME_DIR/state/ios.meta")"
+pass "a live remote route moves from claude to omp and back with one record line per axis"
+
 # --- the parent records what the host confirmed, not what it was asked ------
 reset_meta
 FM_FAKE_RELAUNCH_MODE=confirm-other

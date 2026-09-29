@@ -10,11 +10,12 @@
 # it appends a second copy of the mate's own job description with no defined
 # precedence. Replacing the agent is the only mechanism that guarantees the new
 # bytes are the ones read, and the only one that re-resolves the launch-time
-# wiring - harness, model, effort, turn-end hooks, and every other flag a harness
-# reads once at startup. That second half is why the update pass sends every live
-# mate here, including one already on the target commit: launch-time wiring is
-# not derivable from a git diff, so an unchanged tracked surface does not mean
-# the running agent is already on the current behavior.
+# wiring - a local mate's harness, model, and effort, turn-end hooks, and every
+# other flag a harness reads once at startup. That second half is why the
+# update pass sends every live mate here, including one already on the target
+# commit: launch-time wiring is not derivable from a git diff, so an unchanged
+# tracked surface does not mean the running agent is already on the current
+# behavior.
 #
 # The cost of that guarantee is the conversation, which is why this command runs
 # in two phases and why the first one is a GATE, not a courtesy:
@@ -41,15 +42,16 @@
 # clean reload. Once a relaunch is attempted, any failed or ambiguous result is
 # reported as unknown rather than attributing it to either incarnation.
 #
-# Placement changes the transport and nothing else. A local mate is restarted
-# with bin/fm-control.sh <id> relaunch, which republishes this home's own
-# metadata directly; a remote mate is restarted with
-# bin/fm-remote-secondmate-relaunch.sh, which runs that same command on its
+# Placement changes the transport and the profile source. A local mate is
+# restarted with bin/fm-control.sh <id> relaunch, which re-resolves this home's
+# secondmate pin and republishes this home's own metadata directly; a remote
+# mate is restarted with bin/fm-remote-secondmate-relaunch.sh on the harness,
+# model, and effort its route record names, which runs that same command on its
 # host over bin/fm-on.sh and then republishes this primary's own route
 # metadata from the identity the host confirmed, since the host-local verb can
-# only rewrite its own endpoint record. The restart decision, the profile, the
-# request text, the bound, the failure vocabulary, and this report are all
-# computed here in the primary and are identical for both.
+# only rewrite its own endpoint record. The restart decision, the request text,
+# the bound, the failure vocabulary, and this report are all computed here in
+# the primary and are identical for both.
 #
 # Nothing here forces, stashes, or discards anything. bin/fm-control.sh owns the
 # restart transaction, its checkpoint, its journal, and its rollback; a refusal
@@ -269,21 +271,26 @@ while [ "$i" -lt "${#IDS[@]}" ]; do
   HARNESS[i]=$FM_SECONDMATE_RESTART_HARNESS
   if [ "${PLACEMENT[i]}" = remote ]; then
     # A local relaunch re-resolves this home's durable secondmate pin on its own,
-    # which is the one owner of that resolution. A remote one cannot: it runs in
-    # a home whose config/secondmate-harness is deliberately NOT inherited, so
-    # the file on that host belongs to a different home and re-resolving there
-    # would silently move the mate onto another runtime. Resolve the pin here and
-    # pass it explicitly, so both placements land on the same decision.
-    HARNESS[i]=$("$SCRIPT_DIR/fm-harness.sh" secondmate 2>/dev/null || true)
-    [ -n "${HARNESS[i]}" ] || HARNESS[i]=$FM_SECONDMATE_RESTART_HARNESS
-    MODEL[i]=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model 2>/dev/null || true)
-    EFFORT[i]=$("$SCRIPT_DIR/fm-harness.sh" secondmate-effort 2>/dev/null || true)
+    # which is the one owner of that resolution. A remote route instead keeps
+    # the runtime it was launched or last relaunched with: this home's pin may
+    # name another runtime than the route runs, and the host-local relaunch
+    # cannot re-resolve anything itself, because config/secondmate-harness is
+    # deliberately NOT inherited into that home. So pass the profile this
+    # home's route record names explicitly, the same record liveness recovery
+    # reuses; bin/fm-remote-secondmate-relaunch.sh is the one way to move a
+    # remote route onto another runtime.
+    MODEL[i]=$(fm_meta_get "$STATE/$id.meta" model)
+    EFFORT[i]=$(fm_meta_get "$STATE/$id.meta" effort)
     case "${EFFORT[i]}" in
-      ''|low|medium|high|xhigh|max|ultra) ;;
-      *) EFFORT[i]="" ;;
+      ''|default|low|medium|high|xhigh|max|ultra) ;;
+      *)
+        REASON[i]="its route record names effort '${EFFORT[i]}', which is not a verified effort, so restarting would change its profile"
+        i=$((i + 1))
+        continue
+        ;;
     esac
     if [ "${EFFORT[i]}" = ultra ] && ! "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "${HARNESS[i]}" "${MODEL[i]}" "${EFFORT[i]}"; then
-      REASON[i]="the configured Ultra profile does not select native Codex through Pi"
+      REASON[i]="the recorded Ultra profile does not select native Codex through Pi"
       i=$((i + 1))
       continue
     fi

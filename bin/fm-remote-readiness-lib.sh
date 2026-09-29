@@ -2,7 +2,7 @@
 # fm-remote-readiness-lib.sh - the remote second-mate readiness gate sequence.
 #
 # Source this file and call:
-#   fm_remote_readiness_ensure <bin-dir> <secondmate-id>
+#   fm_remote_readiness_ensure <bin-dir> <secondmate-id> [<harness>]
 #
 # It runs bin/fm-remote-doctor.sh on that route's configured host, and when the
 # read-only run reports any gap it runs the doctor again with --fix and then a
@@ -10,6 +10,10 @@
 # never trusted on its own word. bin/fm-remote-doctor.sh remains the single
 # owner of every check, every repair, and every message; nothing here restates
 # them.
+#
+# <harness> is the runtime the launch or recovery will use. omp is the only
+# runtime with its own doctor check, so only omp is forwarded (--harness omp);
+# every other runtime keeps the harness-agnostic doctor call.
 #
 # Returns 0 when the host is ready, 1 when a gap remains, and 255 when SSH could
 # not complete. 255 means unknown remote completion, so a caller preserves its
@@ -21,21 +25,24 @@
 # shellcheck disable=SC2034
 FM_REMOTE_READINESS_OUT=
 
-fm_remote_readiness_ensure() { # <bin-dir> <secondmate-id>
-  local bin_dir=$1 id=$2 out rc
+fm_remote_readiness_ensure() { # <bin-dir> <secondmate-id> [<harness>]
+  local bin_dir=$1 id=$2 harness=${3:-} out rc
+  local -a runtime_args=()
 
-  out=$("$bin_dir/fm-on.sh" "$id" fm-remote-doctor.sh < /dev/null 2>&1)
+  [ "$harness" != omp ] || runtime_args=(--harness omp)
+
+  out=$("$bin_dir/fm-on.sh" "$id" fm-remote-doctor.sh ${runtime_args[@]+"${runtime_args[@]}"} < /dev/null 2>&1)
   rc=$?
   FM_REMOTE_READINESS_OUT=$out
   [ "$rc" -ne 0 ] || return 0
   [ "$rc" -ne 255 ] || return 255
 
-  out=$("$bin_dir/fm-on.sh" "$id" fm-remote-doctor.sh --fix < /dev/null 2>&1)
+  out=$("$bin_dir/fm-on.sh" "$id" fm-remote-doctor.sh --fix ${runtime_args[@]+"${runtime_args[@]}"} < /dev/null 2>&1)
   rc=$?
   FM_REMOTE_READINESS_OUT=$out
   [ "$rc" -ne 255 ] || return 255
 
-  out=$("$bin_dir/fm-on.sh" "$id" fm-remote-doctor.sh < /dev/null 2>&1)
+  out=$("$bin_dir/fm-on.sh" "$id" fm-remote-doctor.sh ${runtime_args[@]+"${runtime_args[@]}"} < /dev/null 2>&1)
   rc=$?
   FM_REMOTE_READINESS_OUT=$out
   [ "$rc" -ne 255 ] || return 255
