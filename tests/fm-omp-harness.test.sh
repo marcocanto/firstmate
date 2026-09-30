@@ -870,8 +870,8 @@ const state = `${process.env.FM_HOME}/state`;
 writeFileSync(`${state}/.lock`, `${process.pid}\n`);
 const handoff = `${state}/extensions/omp-primary-watch/session-replacement-actionable.json`;
 const handlers = new Map();
-// The fake omp: a run is open while streaming; the conversation's last
-// message decides whether an idle follow-up can start a turn. While it settles
+// The fake omp: a run is open while streaming; the last message of the
+// conversation decides whether an idle follow-up can start a turn. While it settles
 // a natural agent_end it is not streaming yet still reads not idle.
 let streaming = false; let settling = false; let tail = "assistant";
 const followUps = []; const turns = []; const interruptions = []; const steers = [];
@@ -887,7 +887,7 @@ const startRun = async (text) => {
   await userStart(text);
   turns.push(text);
 };
-// The run's loop takes queued follow-ups before it ends with a final answer.
+// The loop of the run takes queued follow-ups before it ends with a final answer.
 const endRun = async () => {
   while (followUps.length > 0) {
     const next = followUps.shift();
@@ -931,7 +931,7 @@ const wakeTurn = (n) => turns.some((t) => t.includes(`FIRSTMATE WATCHER WAKE: si
 const mod = await import(pathToFileURL(process.env.EXT).href);
 mod.default(pi);
 await handlers.get("session_start")({ type: "session_start" }, ctx);
-// The captain's turn ends with a final answer, then the advisor appends its
+// The turn of the captain ends with a final answer, then the advisor appends its
 // note: main is idle and the conversation no longer ends in an assistant reply.
 await startRun("captain: what is the fleet doing?");
 await endRun();
