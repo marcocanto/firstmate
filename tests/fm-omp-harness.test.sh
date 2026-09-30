@@ -644,7 +644,7 @@ await tool.execute();
 for (let i = 0; i < 60 && sent.length < 1; i += 1) await new Promise((r) => setTimeout(r, 100));
 if (sent.length !== 1) throw new Error(`expected the first wake, saw ${JSON.stringify(sent)}`);
 const wake = sent[0].m;
-// The restore as omp writes it: a captain's queued message, the wake, then a
+// The restore as omp writes it: a queued captain message, the wake, then a
 // draft that carries its own blank lines and indentation.
 const captainQueued = "captain queued: check the deploy";
 const draft = "\n\ncaptain draft line one\n\n  indented line two\n";
@@ -751,7 +751,7 @@ const steer = sent[1];
 if (steer.o?.deliverAs !== "steer") throw new Error(`the continuation must be a steer: ${JSON.stringify(steer.o)}`);
 if (steer.m === wake || steer.m.includes("FIRSTMATE WATCHER WAKE:")) throw new Error(`the steer must not copy the wake: ${steer.m}`);
 if (!steer.m.startsWith("⁣FIRSTMATE_OP: v1 watcher: ")) throw new Error(`the steer must be typed operational input: ${steer.m}`);
-// The steer's own turn starts; a later settled run with the wake still
+// The turn of the steer starts; a later settled run with the wake still
 // queued earns no second steer.
 await userStart(steer.m);
 await end();
