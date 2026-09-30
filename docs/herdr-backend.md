@@ -822,6 +822,9 @@ The helper:
 Immediately before every destructive call it re-queries the named session and refuses empty, missing, literal `default`, or `default:true` identities.
 Its before/after tripwire protects every pre-existing session, including stopped sessions; the helper's header owns the recorded identity fields and mismatch policy.
 The live fleet may use a named session while `default` is stopped.
+For a foreground server that must keep its supervisor's tracked PID, the helper also supports a prepared same-PID start.
+The foreground action checks the protected inventory and lab state from one snapshot before it execs the server.
+The helper's header owns its ownership and inventory checks; the parent supervisor must retain the combined cleanup trap.
 
 The helper's header and `--help` own exact commands.
 Tests use thin compatibility wrappers in `tests/herdr-test-safety.sh` and never duplicate the destructive policy.

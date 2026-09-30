@@ -68,6 +68,8 @@ case "$1 ${2:-}" in
       "$FM_FAKE_HERDR_REAL_SLEEP" "$FM_FAKE_HERDR_SERVER_DELAY"
     fi
     printf '%s\n' running > "$state/$session"
+    printf '%s\n' "$$" > "$state/$session.server-pid"
+    exit "${FM_FAKE_HERDR_SERVER_EXIT:-0}"
     ;;
   "status --json")
     if [ "$lab_state" = running ]; then
@@ -107,11 +109,89 @@ run_with_fake() {
     FM_FAKE_HERDR_LOG="$FAKE_LOG" \
     FM_FAKE_HERDR_REAL_SLEEP="$REAL_SLEEP" \
     FM_FAKE_HERDR_SERVER_DELAY="${FM_FAKE_HERDR_SERVER_DELAY:-0}" \
+    FM_FAKE_HERDR_SERVER_EXIT="${FM_FAKE_HERDR_SERVER_EXIT:-0}" \
     FM_FAKE_HERDR_FAST_POLL="${FM_FAKE_HERDR_FAST_POLL:-}" \
     FM_FAKE_HERDR_DELETE_FAIL="${FM_FAKE_HERDR_DELETE_FAIL:-}" \
     FM_FAKE_HERDR_TITLE_FAIL="${FM_FAKE_HERDR_TITLE_FAIL:-}" \
     FM_HERDR_LAB_STATE_DIR="$TRIPWIRES" \
     "$@"
+}
+
+test_serve_owned_states_keep_pid() {
+  local state code name pid status
+  for state in absent stopped; do
+    for code in 0 23; do
+      name="fm-lab-serve-$state-$code-$$"
+      run_with_fake fm_herdr_lab_prepare "$name" || fail "serve baseline preparation failed"
+      [ "$state" != stopped ] || printf 'stopped\n' > "$FAKE_STATE/$name"
+      (
+        FM_FAKE_HERDR_SERVER_EXIT=$code run_with_fake exec bash "$ROOT/bin/fm-herdr-lab.sh" serve "$name"
+      ) > "$TMP_ROOT/serve.out" 2>&1 &
+      pid=$!
+      status=0
+      wait "$pid" || status=$?
+      expect_code "$code" "$status" "serve did not preserve the server exit status for $state"
+      assert_present "$FAKE_STATE/$name.server-pid" "serve never started its owned lab"
+      [ "$(cat "$FAKE_STATE/$name.server-pid")" = "$pid" ] || fail "serve replaced the process PID"
+      [ "$(cat "$FAKE_STATE/$name")" = running ] || fail "serve did not start the exact owned lab"
+      run_with_fake fm_herdr_lab_teardown "$name" || fail "serve fixture cleanup failed"
+    done
+  done
+  pass "fm-herdr-lab: serve keeps the PID and exit status for absent and stopped owned labs"
+}
+
+test_serve_refuses_unowned_and_unsafe_targets() {
+  local name status
+  for name in default arbitrary-session '' fm-lab-previous "fm-lab-unowned-$$"; do
+    : > "$FAKE_LOG"
+    status=0
+    run_with_fake bash "$ROOT/bin/fm-herdr-lab.sh" serve "$name" >/dev/null 2>&1 || status=$?
+    expect_code 1 "$status" "serve accepted an unsafe or unowned target: $name"
+    [ ! -s "$FAKE_LOG" ] || fail "serve queried Herdr before refusing an unsafe or unowned target"
+  done
+  status=0
+  run_with_fake bash "$ROOT/bin/fm-herdr-lab.sh" serve "fm-lab-extra-$$" printf ignored >/dev/null 2>&1 || status=$?
+  expect_code 2 "$status" "serve accepted an arbitrary command or extra arguments"
+  [ ! -s "$FAKE_LOG" ] || fail "an extra-argument serve reached Herdr"
+  pass "fm-herdr-lab: serve refuses unsafe names, unowned labs, and extra arguments before Herdr"
+}
+
+test_serve_refuses_unready_inventory() {
+  local name="fm-lab-serve-refusal-$$" invalid status before
+  local -a inventories=(
+    'not json'
+    ''
+    '{"sessions":null}'
+    '{"sessions":[]}'
+  )
+  run_with_fake fm_herdr_lab_prepare "$name" || fail "serve refusal baseline preparation failed"
+  before=$(cat "$TRIPWIRES/$name.fleet-state.json")
+  inventories+=(
+    "$(jq -c '{sessions:.}, {sessions:.}' "$INVENTORY")"
+    "$(jq -cn --arg name "$name" --slurpfile fleet "$INVENTORY" \
+      '{sessions: ($fleet[0] + [{name:$name,default:false,running:true,socket_path:"/lab/owned.sock"}])}')"
+    "$(jq -cn --arg name "$name" --slurpfile fleet "$INVENTORY" \
+      '{sessions: ($fleet[0] + [{name:$name,default:true,running:false,socket_path:"/lab/owned.sock"}])}')"
+    "$(jq -cn --arg name "$name" --slurpfile fleet "$INVENTORY" \
+      '{sessions: ($fleet[0] + [{name:$name,default:false,running:false,socket_path:"/lab/owned.sock"},{name:$name,default:false,running:false,socket_path:"/lab/other.sock"}])}')"
+    "$(jq -cn --arg name "$name" --slurpfile fleet "$INVENTORY" \
+      '{sessions: ($fleet[0] + [{name:$name,default:false,running:"false",socket_path:"/lab/owned.sock"}])}')"
+    "$(jq -c '{sessions: map(if .name == "operator" then .running = false else . end)}' "$INVENTORY")"
+    "$(jq -c '{sessions: (. + [{name:"new-session",default:false,running:false,socket_path:"/lab/new.sock"}])}' "$INVENTORY")"
+  )
+  for invalid in "${inventories[@]}"; do
+    printf '%s\n' "$invalid" > "$FAKE_STATE/session-list.json"
+    : > "$FAKE_LOG"
+    status=0
+    run_with_fake bash "$ROOT/bin/fm-herdr-lab.sh" serve "$name" >/dev/null 2>&1 || status=$?
+    expect_code 1 "$status" "serve accepted running, default, ambiguous, malformed, or changed inventory"
+    assert_no_grep '^server ' "$FAKE_LOG" "a refused serve started Herdr"
+    assert_absent "$FAKE_STATE/$name.server-pid" "a refused serve created a server process"
+    [ "$(cat "$TRIPWIRES/$name.fleet-state.json")" = "$before" ] || fail "serve changed its refused ownership record"
+  done
+  rm -f "$FAKE_STATE/session-list.json"
+  run_with_fake fm_herdr_lab_teardown "$name" || fail "serve refusal fixture cleanup failed"
+  pass "fm-herdr-lab: serve refuses unready inventory and retains its ownership evidence"
 }
 
 test_refuses_unsafe_names() {
@@ -308,6 +388,8 @@ test_inventory_changes_retain_evidence() {
 test_malformed_inventory_refuses_provision() {
   local invalid name status
   local -a invalid_inventories=(
+    ''
+    "$(jq -c '{sessions:.}, {sessions:.}' "$INVENTORY")"
     '{"sessions":null}'
     '{"sessions":{}}'
     '{"sessions":[]}'
@@ -644,6 +726,9 @@ test_viewer_launcher_refuses_unsafe_arguments() {
   pass "fm-herdr-lab: the viewer launcher refuses unsafe sessions and pidfiles"
 }
 
+test_serve_owned_states_keep_pid
+test_serve_refuses_unowned_and_unsafe_targets
+test_serve_refuses_unready_inventory
 test_refuses_unsafe_names
 test_provision_run_and_guarded_teardown
 test_run_scopes_session_before_double_dash

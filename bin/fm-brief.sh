@@ -473,7 +473,8 @@ HERDR_SECTION=$(printf '%s\n' \
 'Your single EXIT cleanup trap must kill only the server addressed through that `TMUX_TMPDIR`, call `"$LAB_HOME_HELPER" teardown "$FM_HOME"`, and call the Herdr teardown below; do not install a second trap that replaces either cleanup.' \
 '' \
 '1. Set `HERDR_LAB_HELPER='"$HERDR_LAB_HELPER"'` and generate the session name with `HERDR_LAB_SESSION=$("$HERDR_LAB_HELPER" name '"$ID"')`.' \
-'   Install the combined EXIT cleanup before provisioning, then provision only with `"$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION"`.' \
+'   Install the combined EXIT cleanup before provisioning, then use `"$HERDR_LAB_HELPER" provision "$HERDR_LAB_SESSION"` for an ordinary lab start.' \
+'   For a same-PID foreground server, first use `"$HERDR_LAB_HELPER" prepare "$HERDR_LAB_SESSION"`, then run `"$HERDR_LAB_HELPER" serve "$HERDR_LAB_SESSION"` in the server process. Keep the combined cleanup trap in its supervisor; serve replaces its calling process.' \
 '2. Run every task-specific non-lifecycle Herdr command through `"$HERDR_LAB_HELPER" run "$HERDR_LAB_SESSION" <arguments...>`.' \
 '   The helper supplies the required `--session "$HERDR_LAB_SESSION"` as a Herdr option, before any `--` delimiter; `HERDR_SESSION` alone is never accepted as isolation.' \
 '3. Teardown only through `"$HERDR_LAB_HELPER" teardown "$HERDR_LAB_SESSION"`.' \
