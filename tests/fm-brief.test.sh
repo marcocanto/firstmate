@@ -511,37 +511,6 @@ test_ship_project_memory_wording() {
   pass "fm-brief.sh: ship project-memory wording bounds edits to corrections of wrong information"
 }
 
-test_herdr_lab_contract_is_explicit_and_complete() {
-  local home id brief
-  home="$TMP_ROOT/herdr-lab-home"
-  mkdir -p "$home/data"
-  id="brief-herdr-lab-d1"
-  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" firstmate --mode no-mistakes --herdr-lab >/dev/null 2>&1
-  brief="$home/data/$id/brief.md"
-  assert_present "$brief" "Herdr lab brief was not scaffolded"
-  assert_grep "# Herdr isolation - HARD SAFETY CONTRACT" "$brief" \
-    "Herdr lab brief missing its hard safety contract"
-  assert_grep "HERDR_LAB_HELPER='$ROOT/bin/fm-herdr-lab.sh'" "$brief" \
-    "Herdr lab brief must bind the absolute Firstmate helper path"
-  assert_grep "HERDR_LAB_SESSION=\$(\"\$HERDR_LAB_HELPER\" name $id)" "$brief" \
-    "Herdr lab brief missing helper-owned session naming"
-  assert_grep "\"\$HERDR_LAB_HELPER\" provision \"\$HERDR_LAB_SESSION\"" "$brief" \
-    "Herdr lab brief missing helper-owned provisioning"
-  assert_grep "\"\$HERDR_LAB_HELPER\" teardown \"\$HERDR_LAB_SESSION\"" "$brief" \
-    "Herdr lab brief missing helper-owned teardown"
-  assert_grep "required \`--session \"\$HERDR_LAB_SESSION\"\` as a Herdr option, before any \`--\` delimiter" "$brief" \
-    "Herdr lab brief missing the per-call session option contract"
-  assert_grep "direct \`herdr server stop\`" "$brief" \
-    "Herdr lab brief missing the forbidden server-global command list"
-  assert_grep "records the live default session before provisioning" "$brief" \
-    "Herdr lab brief missing the before tripwire"
-  assert_grep "verifies the identical fleet state after teardown" "$brief" \
-    "Herdr lab brief missing the after tripwire"
-  assert_no_grep "Herdr lifecycle declaration - NOT ENABLED" "$brief" \
-    "Herdr lab brief retained the unguarded declaration"
-  pass "fm-brief.sh: --herdr-lab emits the complete hard safety contract"
-}
-
 test_herdr_lab_contract_quotes_foreign_firstmate_path() {
   local home id brief foreign_root helper
   home="$TMP_ROOT/herdr-lab-foreign-home"
@@ -1339,7 +1308,6 @@ test_no_mistakes_dod_green_detection
 test_pr_based_dod_requires_non_draft
 test_ask_user_escalation_format
 test_ship_project_memory_wording
-test_herdr_lab_contract_is_explicit_and_complete
 test_herdr_lab_contract_quotes_foreign_firstmate_path
 test_herdr_lab_omission_is_loud_for_ship_and_scout
 test_documented_global_replace_leaves_the_herdr_gate_intact

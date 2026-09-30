@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Provision and operate an isolated Herdr lab session without risking the live
-# default session.
+# Provision and operate an isolated Herdr lab session without changing any
+# pre-existing session.
 #
 # Usage:
 #   fm-herdr-lab.sh name <label>
@@ -25,8 +25,14 @@
 # delete is available only through teardown.
 # Both paths perform a fresh refuse-default check immediately before each
 # destructive call.
-# Provision records the running default session as a fleet-state tripwire and
-# teardown requires that record to be identical afterward.
+# Provision records every pre-existing session, running or stopped, as a
+# canonical inventory of name, default, running, and socket_path.
+# Only the owned lab name is excluded from later comparisons.
+# Re-provision and teardown require that inventory to remain identical;
+# unrelated changes stop the test and retain its record, never authorize
+# repairs to protected sessions. No running default session is required.
+# The inventory must still identify exactly one default:true session named
+# default; its running state may be false.
 # The viewer command attaches or detaches one real foreground Herdr client on
 # an owned lab session over a fixed 40-row by 120-column pty;
 # bin/fm-herdr-lab-viewer.py owns the pty mechanics.
@@ -82,15 +88,24 @@ fm_herdr_lab_fleet_state() { # <session>
     fm_herdr_lab_error "cannot read Herdr sessions for the fleet-state tripwire"
     return 1
   }
-  snapshot=$(printf '%s' "$sessions" | jq -c '
-    [.sessions[]? | select(.default == true)]
-    | if length == 1 and .[0].name == "default" and .[0].running == true
-      then .[0] | {name, default, running, socket_path}
-      else empty
-      end
-  ' 2>/dev/null)
-  [ -n "$snapshot" ] || {
-    fm_herdr_lab_error "fleet-state tripwire requires exactly one running default session"
+  snapshot=$(printf '%s' "$sessions" | jq -ce --arg name "$name" '
+    .sessions
+    | if type != "array" then error("sessions must be an array") else . end
+    | if all(.[];
+        (.name | type) == "string" and (.name | length) > 0
+        and (.default | type) == "boolean"
+        and (.running | type) == "boolean"
+        and (.socket_path | type) == "string" and (.socket_path | length) > 0)
+      then . else error("invalid session identity") end
+    | if length == (map(.name) | unique | length)
+      then . else error("duplicate session names") end
+    | (map(select(.default == true))) as $defaults
+    | if ($defaults | length) == 1 and $defaults[0].name == "default"
+      then . else error("invalid default session identity") end
+    | map(select(.name != $name) | {name, default, running, socket_path})
+    | sort_by(.name)
+  ' 2>/dev/null) || {
+    fm_herdr_lab_error "fleet-state tripwire requires a valid, unambiguous session inventory"
     return 1
   }
   printf '%s\n' "$snapshot"
@@ -466,7 +481,7 @@ fm_herdr_lab_check_tripwire() { # <session>
   before=$(cat "$tripwire")
   after=$(fm_herdr_lab_fleet_state "$name") || return 1
   [ "$before" = "$after" ] || {
-    fm_herdr_lab_error "FLEET-STATE TRIPWIRE FAILED: default session changed during lab work"
+    fm_herdr_lab_error "FLEET-STATE TRIPWIRE FAILED: protected session inventory changed during lab work"
     fm_herdr_lab_error "before: $before"
     fm_herdr_lab_error "after:  $after"
     return 1
