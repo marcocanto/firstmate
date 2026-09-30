@@ -1265,7 +1265,11 @@ pass "startup repairs remote readiness before probing without relaunching"
 remote_route_meta="$REMOTE_HOME/state/parent-route/ios.meta"
 WATCH_STATE="$TMP_ROOT/watch-liveness-state"
 mkdir -p "$WATCH_STATE"
-cp "$PARENT/state/ios.meta" "$WATCH_STATE/ios.meta"
+# A route moved by bin/fm-remote-secondmate-relaunch.sh onto no model or effort
+# pin records the host's literal "default" for both axes; recovery must read
+# that as no pin rather than refuse the recorded effort.
+sed -e 's/^model=.*/model=default/' -e 's/^effort=.*/effort=default/' \
+  "$PARENT/state/ios.meta" > "$WATCH_STATE/ios.meta"
 # The remote spawn path mints its inheritance generation from a counter that
 # lives beside the task record, so the dedicated watch state needs the real
 # one; otherwise the pushed payload reads as superseded on the remote home.

@@ -989,8 +989,17 @@ spawn_remote_secondmate() {
   effort=${EFFORT:--}
   if [ -z "$HARNESS_ARG" ] && [ -z "$positional" ]; then
     if [ "$route_recorded" -eq 1 ]; then
-      [ "$MODEL_SET" -eq 1 ] || model=${recorded_model:--}
-      [ "$EFFORT_SET" -eq 1 ] || effort=${recorded_effort:--}
+      # bin/fm-remote-secondmate-relaunch.sh republishes the host's own
+      # endpoint record, which stores an absent pin as the literal "default";
+      # this file's own record stores it empty. Both mean no pin.
+      if [ "$MODEL_SET" -eq 0 ]; then
+        model=${recorded_model:--}
+        [ "$model" != default ] || model=-
+      fi
+      if [ "$EFFORT_SET" -eq 0 ]; then
+        effort=${recorded_effort:--}
+        [ "$effort" != default ] || effort=-
+      fi
     else
       if [ "$MODEL_SET" -eq 0 ]; then
         model=$("$SCRIPT_DIR/fm-harness.sh" secondmate-model)
