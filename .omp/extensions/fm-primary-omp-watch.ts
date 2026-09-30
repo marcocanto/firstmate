@@ -93,7 +93,8 @@
 //      operational steer, never a second copy of a wake, starts a turn; a
 //      queued steer clears the suppression or passes the advisor's note, and
 //      omp delivers the stranded wakes after it. Each stranded wake earns at
-//      most one steer.
+//      most one steer omp accepts; a rejected steer lets a later agent_end
+//      try again.
 // Each agent_end is checked once, and only the latest one pending settle acts;
 // a later agent_end or a replaced generation ends an earlier check.
 // A blind Enter from the parent is never safe here because the restored text
