@@ -70,7 +70,17 @@ command_fields=$(perl -MMIME::Base64=decode_base64 -e '
 IFS=$'\t' read -r cmd action id harness model effort <<EOF
 $command_fields
 EOF
+if [ "$cmd" = fm-remote-doctor.sh ]; then
+  printf '%s %s %s\n' "$cmd" "$action" "$id" >> "$FM_FAKE_HOST_LOG"
+  if [ "$FM_FAKE_DOCTOR_MODE" = omp-missing ]; then
+    printf 'check harness_omp=human: omp does not resolve on PATH\n'
+    exit 1
+  fi
+  printf 'ready\n'
+  exit 0
+fi
 [ "$cmd" = fm-remote-secondmate-control.sh ] || exit 93
+printf '%s %s %s\n' "$cmd" "$action" "$id" >> "$FM_FAKE_HOST_LOG"
 [ "$action" = relaunch ] || exit 94
 case "$FM_FAKE_RELAUNCH_MODE" in
   refuse)
@@ -98,6 +108,8 @@ chmod +x "$FAKEBIN/fake-ssh"
 run_relaunch() {  # <args...>
   env FM_HOME="$HOME_DIR" FM_SSH_BIN="$FAKEBIN/fake-ssh" \
     FM_FAKE_RELAUNCH_MODE="${FM_FAKE_RELAUNCH_MODE:-}" \
+    FM_FAKE_DOCTOR_MODE="${FM_FAKE_DOCTOR_MODE:-}" \
+    FM_FAKE_HOST_LOG="$TMP/host.log" \
     "$ROOT/bin/fm-remote-secondmate-relaunch.sh" "$@" 2>&1
 }
 
@@ -167,6 +179,26 @@ assert_contains "$OUT" "unverified remote secondmate harness" \
 cmp -s "$TMP/ios-before-refusal.meta" "$HOME_DIR/state/ios.meta" \
   || fail "a refused relaunch must not touch the parent's record"
 pass "a refused remote relaunch leaves the parent's record untouched"
+
+# --- an omp relaunch onto a host where omp does not resolve is refused -------
+# The host-local relaunch stops the running agent first, so the refusal must
+# come from the readiness gate before any relaunch reaches the host.
+reset_meta
+cp "$HOME_DIR/state/ios.meta" "$TMP/ios-before-omp-refusal.meta"
+: > "$TMP/host.log"
+FM_FAKE_DOCTOR_MODE=omp-missing
+OUT=$(run_relaunch ios omp anthropic/claude-opus-5-5 high); RC=$?
+unset FM_FAKE_DOCTOR_MODE
+[ "$RC" -ne 0 ] || fail "an omp relaunch onto a host without omp must not be reported as successful"
+assert_contains "$OUT" "omp does not resolve on PATH" \
+  "the readiness check's own message should reach the caller"
+assert_grep 'fm-remote-doctor.sh --harness omp' "$TMP/host.log" \
+  "the omp readiness check should run on the host"
+assert_no_grep 'fm-remote-secondmate-control.sh' "$TMP/host.log" \
+  "a refused omp relaunch must not reach the host-local relaunch that stops the running mate"
+cmp -s "$TMP/ios-before-omp-refusal.meta" "$HOME_DIR/state/ios.meta" \
+  || fail "a refused omp relaunch must not touch the parent's record"
+pass "an omp relaunch onto a host without omp is refused before the running mate is touched"
 
 # --- a local (non-remote) secondmate is refused, not silently mishandled ----
 fm_write_meta "$HOME_DIR/state/local1.meta" \
