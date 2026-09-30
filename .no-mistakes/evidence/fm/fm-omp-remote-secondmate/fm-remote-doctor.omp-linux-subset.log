@@ -1,0 +1,5 @@
+ok - a non-darwin host skips launch agents and starts its herdr server directly
+ok - --fix creates only owned version-manager wrappers and never clobbers an operator file
+ok - --harness omp reports omp resolution as human or fixable, --fix wraps a managed omp, and omp alone satisfies the harness requirement
+ok - doctor refreshes stale worker identity before probing tools
+ok - the entrypoint symlink is recreated when absent and never overwritten when operator-owned

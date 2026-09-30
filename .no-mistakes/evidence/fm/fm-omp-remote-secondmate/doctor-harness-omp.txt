@@ -1,0 +1,85 @@
+$ bin/fm-remote-doctor.sh --harness omp
+mode=check
+path=<home>/.local/bin:/opt/homebrew/bin:<home>/.bun/bin:<home>/.antigravity/antigravity/bin:/opt/homebrew/opt/openjdk@21/bin:<home>/Library/Python/3.9/bin:<home>/.local/bin:<home>/.bun/bin:<home>/.local/bin:<home>/.bun/bin:<home>/.nvm/versions/node/v22.19.0/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:/opt/homebrew/bin:<home>/.bun/bin:<home>/.local/bin:<home>/go/bin:<home>/.cargo/bin:<home>/bin:/opt/homebrew/sbin:/usr/local/sbin:/Applications/Obsidian.app/Contents/MacOS:/Applications/Claude.app:<home>/.maestro/bin:<home>/.claude/plugins/synced/f0f635d9-c832-4ce7-92fc-1ea3109d4aa8_90725a08-9202-48a0-8a70-abe8c234b5dc/cowork-plugin-management/bin
+entrypoint=no
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+platform=darwin
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required herdr=/opt/homebrew/bin/herdr
+required tasks-axi=<home>/.nvm/versions/node/v22.19.0/bin/tasks-axi
+required treehouse=<home>/.local/bin/treehouse
+required harness=claude:<home>/.local/bin/claude
+optional tmux=/opt/homebrew/bin/tmux
+optional no-mistakes=<home>/.local/bin/no-mistakes
+optional gh=/opt/homebrew/bin/gh
+check herdr=ok: /opt/homebrew/bin/herdr
+check gui-session=ok: gui/501
+check remote-job-worker=fixable: <home>/Library/LaunchAgents/dev.firstmate.remote-job.plist does not match the Firstmate-owned Aqua worker contract
+check remote-job-worker-loaded=fixable: dev.firstmate.remote-job is not loaded in gui/501
+check remote-job-probe=fixable: the remote job worker has not reported a fresh probe
+check launchagent=fixable: no Firstmate herdr launch agent at <home>/Library/LaunchAgents/dev.firstmate.herdr.fm-remote.plist
+check launchagent-scope=skip: no launch agent is installed yet
+check launchagent-loaded=fixable: dev.firstmate.herdr.fm-remote is not loaded into gui/501
+check herdr-server=fixable: the herdr server for session fm-remote is not running
+check entrypoint-link=skip: this run did not come through the fixed remote entrypoint
+check omp=ok: /opt/homebrew/bin/omp
+action: remote-job-worker: rerun this command with --fix to write dev.firstmate.remote-job
+action: remote-job-worker-loaded: rerun this command with --fix to bootstrap the worker
+action: remote-job-probe: rerun this command with --fix to restart the worker, then rerun through fm-on.sh
+action: launchagent: rerun this command with --fix to install it
+action: launchagent-loaded: rerun this command with --fix to bootstrap and start it
+action: herdr-server: rerun this command with --fix to start it
+error: this host is not ready for a remote second mate; unresolved: remote-job-worker remote-job-worker-loaded remote-job-probe launchagent launchagent-loaded herdr-server
+rc=1
+
+$ bin/fm-remote-doctor.sh --harness claude
+error: no runtime-specific readiness check exists for harness: claude
+rc=2
+
+$ PATH=/usr/bin:/bin bin/fm-remote-doctor.sh --harness omp  (omp hidden from PATH)
+mode=check
+path=/usr/bin:/bin
+entrypoint=no
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+platform=darwin
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required herdr=MISSING
+required tasks-axi=MISSING
+required treehouse=MISSING
+required harness=MISSING
+optional tmux=absent
+optional no-mistakes=absent
+optional gh=absent
+check herdr=human: the herdr CLI does not resolve on the remote runtime PATH
+check gui-session=ok: gui/501
+check remote-job-worker=fixable: <home>/Library/LaunchAgents/dev.firstmate.remote-job.plist does not match the Firstmate-owned Aqua worker contract
+check remote-job-worker-loaded=fixable: dev.firstmate.remote-job is not loaded in gui/501
+check remote-job-probe=fixable: the remote job worker has not reported a fresh probe
+check launchagent=fixable: no Firstmate herdr launch agent at <home>/Library/LaunchAgents/dev.firstmate.herdr.fm-remote.plist
+check launchagent-scope=skip: no launch agent is installed yet
+check launchagent-loaded=fixable: dev.firstmate.herdr.fm-remote is not loaded into gui/501
+check herdr-server=human: herdr server status cannot be read without both herdr and jq on the runtime PATH
+check entrypoint-link=skip: this run did not come through the fixed remote entrypoint
+check omp=human: the omp CLI does not resolve on the remote runtime PATH
+action: herdr: install herdr from https://herdr.dev on that account, or add a ~/.local/bin wrapper for it; a remote second mate always runs on the Herdr backend
+action: remote-job-worker: rerun this command with --fix to write dev.firstmate.remote-job
+action: remote-job-worker-loaded: rerun this command with --fix to bootstrap the worker
+action: remote-job-probe: rerun this command with --fix to restart the worker, then rerun through fm-on.sh
+action: launchagent: rerun this command with --fix to install it
+action: launchagent-loaded: rerun this command with --fix to bootstrap and start it
+action: herdr-server: install the missing tool reported above, then rerun this command
+action: omp: install Oh My Pi on that account so omp resolves on the path reported above, or put a wrapper script for it in <home>/.local/bin; see docs/remote-secondmates.md for the wrapper recipe
+error: required tools do not resolve on the remote runtime PATH: herdr tasks-axi treehouse harness
+fix: install each one where it resolves on the path reported above, or put a wrapper script for it in <home>/.local/bin, which is always on that PATH.
+fix: tools in an unselected nvm version or outside the discovered asdf or mise paths need an absolute wrapper; see docs/remote-secondmates.md for the wrapper recipe.
+error: this host is not ready for a remote second mate; unresolved: herdr remote-job-worker remote-job-worker-loaded remote-job-probe launchagent launchagent-loaded herdr-server omp
+rc=1
+
+$ bin/fm-remote-doctor.sh --harness omp --harness omp
+Check, and optionally repair, one remote account's second-mate readiness.
+
+Usage:
+  bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix] [--harness omp]
+rc=2
