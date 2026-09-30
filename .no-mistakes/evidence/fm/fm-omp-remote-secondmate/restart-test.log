@@ -1,0 +1,212 @@
+ok - T1 persist is a gate, and asks for open records and task status only
+ok - T2 the mate persists before anything is stopped
+ok - T2b an arrived persist answer is resolved before timeout
+ok - T2c a reply between the preliminary scan and timeout decision wins
+ok - T3 a runtime that cannot prove a restart falls back to the re-read message
+ok - T4 every named mate is accounted for, including one this home does not know
+ok - T5 a refused restart leaves the mate running and reports an unknown outcome
+ok - T8 a local restart re-resolves this home's pin and reports the runtime that came up
+ok - native Ultra survives local restart and the remote restart transport
+ok - T6 a remote mate restarts on its recorded profile over the fm-on hop
+ok - T6b a route record with an unverified effort falls back instead of changing its profile
+ok - T7 an unreachable host is reported honestly instead of claimed as reloaded
+ok - T9 the persist gate retains its explicitly allocated correlation
+ok - T10 pending persist answers are polled as one fleet
+ok - T11 post-stop restart failure is never misreported as a nudge
+ok - T12 relaunch waits do not block fleet persistence polling
+ok - T13 a dead restart worker cannot hang the parent
+ok - T14 a result published during reaping is honored
+ok - T15 an already-current live mate is named by the update pass and genuinely restarted
+ok - T16 an already-current mate with an unprovable runtime keeps the honest nudge path
+# all fm-secondmate-restart tests passed
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/native-local-1296: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/order-31925: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/pin-3924: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/already-current-553: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state/sm2.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/relaunch-polling-1787: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/post-stop-14559: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/unknown-24617: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/answer-at-timeout-decision-27224: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state/sm2.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/concurrent-waits-22515: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX/arrived-at-bound-3942: Directory not empty
+rm: <temp>/fm-secondmate-restart.CMnIMX: Directory not empty

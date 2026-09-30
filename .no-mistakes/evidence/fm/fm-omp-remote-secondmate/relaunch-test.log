@@ -1,0 +1,8 @@
+ok - a successful remote relaunch republishes the parent's harness, model, and effort
+ok - a live remote route moves from claude to omp and back with one record line per axis
+ok - a remote relaunch records the identity the host confirmed
+ok - a refused remote relaunch leaves the parent's record untouched
+ok - an omp relaunch onto a host without omp is refused before the running mate is touched
+ok - a local secondmate is refused by the remote relaunch tool
+ok - a remote relaunch keeps an already-armed PR poll authenticating
+ALL TESTS PASSED

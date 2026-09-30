@@ -1,0 +1,64 @@
+== fm-remote-secondmate-relaunch
+ok - a successful remote relaunch republishes the parent's harness, model, and effort
+ok - a live remote route moves from claude to omp and back with one record line per axis
+ok - a remote relaunch records the identity the host confirmed
+ok - a refused remote relaunch leaves the parent's record untouched
+ok - an omp relaunch onto a host without omp is refused before the running mate is touched
+ok - a local secondmate is refused by the remote relaunch tool
+ok - a remote relaunch keeps an already-armed PR poll authenticating
+ALL TESTS PASSED
+exit=
+== fm-secondmate-restart
+rm: <temp>/fm-secondmate-restart.xYci27/already-current-7155/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/already-current-7155/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.xYci27/already-current-7155/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.xYci27/already-current-7155/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.xYci27/already-current-7155: Directory not empty
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/pre-rebase: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/pre-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/pre-auto-gc: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/pre-merge-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/post-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/sendemail-validate: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/applypatch-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/prepare-commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/post-checkout: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/post-applypatch: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/post-rewrite: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/commit-msg: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/pre-push: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/post-merge: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks/pre-commit: Permission denied
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state/sm1.git-hooks: Directory not empty
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home/state: Directory not empty
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494/home: Directory not empty
+rm: <temp>/fm-secondmate-restart.xYci27/answer-at-timeout-decision-23494: Directory not empty
+rm: <temp>/fm-secondmate-restart.xYci27: Directory not empty
+exit=
+== fm-remote-secondmate-lifecycle-e2e
+ok - remote seeding provisions a supplied origin without touching the primary project tree
+ok - remote provisioning re-validates a supplied origin at the receiving host
+ok - seeding carries bitbucket, self-hosted, and scp-like origins through to the remote clone
+ok - remote seed registers the route and provisions the whole home and project clone on that host
+ok - remote inheritance rejects incomplete and superseded payload generations
+ok - mixed local and remote routes validate without migration
+ok - remote spawn launches on the remote-local backend and records a host-qualified route
+ok - legacy and mismatched remote endpoints fail closed before backend access
+ok - non-herdr remote endpoints are refused without changing either route
+ok - remote spawn serializes inheritance through launch publication
+ok - marked send and routed reply complete through the existing parent correlation owner
+ok - partial remote inheritance retains reread intent through bootstrap convergence
+ok - config push and bootstrap serialize remote inheritance convergence
+ok - remote inherited config retains and retries a failed live reread nudge
+ok - fleet snapshot projects mixed local and remote structured state
+ok - remote update imports and fast-forwards the persistent home on its configured host
+ok - the remote restart verb delegates to the host-local control plane and refuses before stopping anything
+ok - startup repairs remote readiness before probing without relaunching
+ok - watch liveness: a dead remote secondmate is auto-relaunched on its own host and recorded runtime with one wake
+ok - watch liveness: an unreachable remote secondmate is probed, preserved, and never failed over
+ok - the host-local state read steps around a stale shadowing herdr client
+ok - startup reports alive legacy backends without changing their routes
+ok - unreachable no-ledger remote state remains explicit with no local respawn or failover
+ok - remote retirement refuses child work, then removes only its own endpoint while a shared-session sibling survives
+ALL TESTS PASSED
+exit=

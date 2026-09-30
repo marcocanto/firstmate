@@ -1,0 +1,54 @@
+### 1. omp on PATH (homebrew): $ fm-remote-doctor.sh --harness omp
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+mode=check
+optional tmux=/opt/homebrew/bin/tmux
+optional no-mistakes=absent
+optional gh=/opt/homebrew/bin/gh
+check omp=ok: /opt/homebrew/bin/omp
+error: required tools do not resolve on the remote runtime PATH: tasks-axi treehouse
+fix: install each one where it resolves on the path reported above, or put a wrapper script for it in <temp>/fm-lab.PskE3T/acct/.local/bin, which is always on that PATH.
+fix: tools in an unselected nvm version or outside the discovered asdf or mise paths need an absolute wrapper; see docs/remote-secondmates.md for the wrapper recipe.
+error: this host is not ready for a remote second mate; unresolved: remote-job-worker remote-job-worker-loaded remote-job-probe launchagent launchagent-loaded herdr-server entrypoint-link
+exit=1
+
+### 2. omp absent from PATH: $ fm-remote-doctor.sh --harness omp
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+check omp=human: the omp CLI does not resolve on the remote runtime PATH
+action: omp: install Oh My Pi on that account so omp resolves on the path reported above, or put a wrapper script for it in <temp>/fm-lab.PskE3T/acct/.local/bin; see docs/remote-secondmates.md for the wrapper recipe
+error: required tools do not resolve on the remote runtime PATH: herdr tasks-axi treehouse harness
+fix: install each one where it resolves on the path reported above, or put a wrapper script for it in <temp>/fm-lab.PskE3T/acct/.local/bin, which is always on that PATH.
+fix: tools in an unselected nvm version or outside the discovered asdf or mise paths need an absolute wrapper; see docs/remote-secondmates.md for the wrapper recipe.
+error: this host is not ready for a remote second mate; unresolved: herdr remote-job-worker remote-job-worker-loaded remote-job-probe launchagent launchagent-loaded herdr-server entrypoint-link omp
+exit=1
+
+### 3. omp only as a mise install under the account home: $ fm-remote-doctor.sh --harness omp
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+check omp=fixable: omp is installed at <temp>/fm-lab.PskE3T/acct/.local/share/mise/installs/omp/18.4.3/bin/omp but does not resolve on the remote runtime PATH
+error: required tools do not resolve on the remote runtime PATH: herdr tasks-axi treehouse harness
+action: omp: rerun this command with --fix to add a Firstmate-owned ~/.local/bin wrapper for it
+fix: install each one where it resolves on the path reported above, or put a wrapper script for it in <temp>/fm-lab.PskE3T/acct/.local/bin, which is always on that PATH.
+fix: tools in an unselected nvm version or outside the discovered asdf or mise paths need an absolute wrapper; see docs/remote-secondmates.md for the wrapper recipe.
+error: this host is not ready for a remote second mate; unresolved: herdr remote-job-worker remote-job-worker-loaded remote-job-probe launchagent launchagent-loaded herdr-server entrypoint-link omp
+exit=1
+
+### 4. no --harness: harness-agnostic call has no omp check
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+error: required tools do not resolve on the remote runtime PATH: herdr tasks-axi treehouse harness
+fix: install each one where it resolves on the path reported above, or put a wrapper script for it in <temp>/fm-lab.PskE3T/acct/.local/bin, which is always on that PATH.
+fix: tools in an unselected nvm version or outside the discovered asdf or mise paths need an absolute wrapper; see docs/remote-secondmates.md for the wrapper recipe.
+error: this host is not ready for a remote second mate; unresolved: herdr remote-job-worker remote-job-worker-loaded remote-job-probe launchagent launchagent-loaded herdr-server entrypoint-link
+exit=1
+
+### 5. adversarial: --harness claude is refused
+error: no runtime-specific readiness check exists for harness: claude
+exit=2
+### 6. omp is the only harness on PATH: "harness" is not listed missing
+PATH=<lab>/onlyomp(omp,herdr):/usr/bin:/bin
+path=<temp>/fm-lab.PskE3T/onlyomp:/usr/bin:/bin:/usr/sbin:/sbin
+required herdr=<temp>/fm-lab.PskE3T/onlyomp/herdr
+required harness=omp:<temp>/fm-lab.PskE3T/onlyomp/omp
+check herdr=ok: <temp>/fm-lab.PskE3T/onlyomp/herdr
+check omp=ok: <temp>/fm-lab.PskE3T/onlyomp/omp
+error: required tools do not resolve on the remote runtime PATH: tasks-axi treehouse
+--- control: remove omp, harness requirement fails
+error: required tools do not resolve on the remote runtime PATH: tasks-axi treehouse harness

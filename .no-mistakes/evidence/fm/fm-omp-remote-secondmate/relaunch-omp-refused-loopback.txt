@@ -1,0 +1,24 @@
+$ FM_HOME=<parent> bin/fm-remote-secondmate-relaunch.sh mate1 omp default default   # host PATH lacks omp
+exit=1
+error: remote secondmate mate1 host loophost is not ready for omp; relaunch refused
+check omp=fixable: omp is installed at <lab>/acct/.local/share/mise/installs/omp/18.4.3/bin/omp but does not resolve on the remote runtime PATH
+action: omp: rerun this command with --fix to add a Firstmate-owned ~/.local/bin wrapper for it
+error: this host is not ready for a remote second mate; unresolved: herdr remote-job-worker remote-job-worker-loaded remote-job-probe launchagent launchagent-loaded herdr-server entrypoint-link omp
+--- calls that reached the host:
+host=loophost argv=fm-remote-doctor.sh --harness omp
+host=loophost argv=fm-remote-doctor.sh --fix --harness omp
+host=loophost argv=fm-remote-doctor.sh --harness omp
+--- parent record unchanged:
+identical (harness=claude)
+
+### control: host PATH has omp; the check passes the omp gate and the relaunch then reaches the host
+exit=1
+error: remote secondmate mate1 host loophost is not ready for omp; relaunch refused
+check omp=ok: /opt/homebrew/bin/omp
+host=loophost argv=fm-remote-doctor.sh --harness omp
+host=loophost argv=fm-remote-doctor.sh --fix --harness omp
+host=loophost argv=fm-remote-doctor.sh --harness omp
+
+### claude relaunch skips the omp gate entirely
+host=loophost argv=fm-remote-secondmate-control.sh relaunch mate1 claude default default
+HOST-LOCAL RELAUNCH REACHED (would stop the running mate)
