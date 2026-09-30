@@ -1108,9 +1108,29 @@ Its `ProgramArguments` ran `/run/current-system/sw/bin/zsh -l -c "exec /etc/prof
 No other herdr process existed for that session, and after 15 seconds the job remained running with pid 4806.
 After a guarded `herdr session stop`, the job reported `state = not running` and `last exit code = 0`, and it stayed at rest through the throttle interval.
 A second `launchctl kickstart -k gui/501/dev.fm-rca.herdr-fg` started pid 45574, which was also the new socket owner.
-This proves that `herdr server` remains in the foreground as the launchd job, so the guard's final `exec` supplies the intended supervision and the earlier server that survived `launchctl bootout` was the unrelated SSH-bridge-born process.
+This proves that Herdr 0.9.0 remains in the foreground as the launchd job and that a successful stop lets the job rest.
+It does not verify the same-PID Unix-session detachment now used by `bin/fm-remote-herdr-launch.sh`.
 
-`bin/fm-test-run.sh tests/fm-remote-herdr-guard.test.sh` pins the resulting decision table against real marker-carrying processes, and `tests/fm-remote-doctor.test.sh` pins the doctor's verdicts on the same markers.
+`tests/fm-remote-herdr-guard.test.sh` and `tests/fm-remote-doctor.test.sh` cover Aqua birth and the boolean detached capability as separate readiness conditions.
+
+On 2026-09-30, the real launcher and guard executed a process observer instead of Herdr on Darwin 25.6.0 arm64 with Perl 5.34.1 and Python 3.14.4:
+
+```sh
+bash bin/fm-test-run.sh tests/fm-remote-herdr-launch.test.sh
+```
+
+```text
+ok - inherited group becomes a same-PID session leader and preserves launch context and exit codes
+ok - leader group becomes a same-PID session leader and preserves launch context and exit codes
+ok - a server crash reaches the original supervised PID
+ok - a failed process-group join stops before any server starts
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=1249
+```
+
+That test checks the inherited and process-group-leader cases, a neutral environment marker, stdin/stdout/stderr, successful and nonzero exits, and a SIGKILL crash.
+It rejects a failed process-group join before the guard runs.
+It does not establish a genuine launchd `XPC_SERVICE_NAME`, an Aqua audit session, login-keychain access, launchd restart behavior, or real Herdr saved-machine readiness.
+Refresh those facts with a guarded non-default local LaunchAgent experiment before treating the new launcher as verified.
 
 ### Client selection
 

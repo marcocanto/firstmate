@@ -13,16 +13,15 @@
 # fm-remote session. Its account therefore needs the Firstmate-owned Aqua Herdr
 # agent plus the sibling dev.firstmate.remote-job worker that runs normal fm-on
 # commands through the Aqua or Linux job-worker path. On darwin, that Herdr
-# agent runs bin/fm-remote-herdr-guard.sh through the remote account's login
-# shell (`-l -c`) so the server inherits the account's own environment; the
-# gui/<uid> launchd domain it is bootstrapped into, not the shell, is what
-# gives the server and its panes the Aqua audit session and login-keychain
-# access. The guard execs the server in the foreground under launchd, leaves an
-# Aqua-born server alone, and takes the session over from a server born
-# outside that session (an SSH remote attach wins the socket at boot), because
-# such a server's panes cannot read the login keychain;
-# bin/fm-remote-herdr-owner-lib.sh owns that birth test. Doctor remains
-# invokable over the plain-SSH bootstrap path to inspect and repair that worker.
+# agent runs bin/fm-remote-herdr-launch.sh through the remote account's login
+# shell (`-l -c`) so the server inherits the account's environment. The
+# gui/<uid> domain supplies the Aqua audit session and login-keychain access.
+# The launcher uses Perl POSIX to detach the Unix session with the same PID,
+# then execs the guard, which execs Herdr under launchd. The guard leaves an
+# Aqua-born detached server alone and takes over every other owner.
+# bin/fm-remote-herdr-owner-lib.sh owns the birth test. Doctor checks both
+# Aqua birth and the detached_server_daemon capability on darwin.
+# Doctor remains invokable over the plain-SSH bootstrap path to repair the worker.
 # SSH cannot create an Aqua session, so a host with no GUI login is a human
 # gap rather than something --fix attempts to bypass.
 #
@@ -120,6 +119,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 PLATFORM=$(fm_remote_job_platform)
+[ "$PLATFORM" != darwin ] || REQUIRED_TOOLS+=(perl)
 UID_NUM=$(id -u 2>/dev/null) || UID_NUM=
 
 CHECK_NAMES=()
@@ -194,6 +194,10 @@ herdr_server_running() {
   [ "$running" = true ]
 }
 
+herdr_server_detached() {
+  herdr_server_status_json | jq -e '.server.capabilities.detached_server_daemon == true' >/dev/null 2>&1
+}
+
 # Birth of the process serving the session, as the guard classifies it:
 # prints "<birth> <pid>" (launchd, worker, ssh, or unknown), "unproven" when
 # no herdr process can be shown to hold the socket, or "nolsof" when lsof does
@@ -214,12 +218,13 @@ herdr_server_birth() {
   printf '%s %s\n' "$birth" "$owner"
 }
 
-# On darwin the session is ready only when its server was born in the Aqua
-# login session; elsewhere any running server is.
+# On darwin the session is ready only with an Aqua-born detached server;
+# elsewhere any running server is.
 herdr_server_aqua_owned() {
   local birth
   herdr_server_running || return 1
   [ "$PLATFORM" = darwin ] || return 0
+  herdr_server_detached || return 1
   birth=$(herdr_server_birth)
   fm_remote_herdr_birth_is_aqua "${birth%% *}"
 }
@@ -273,20 +278,16 @@ resolve_launch_agent_shell() {
   printf '%s' /bin/sh
 }
 
-# Login-shell command that execs the Firstmate-owned guard, which in turn execs
-# the resolved herdr so launchd keeps one foreground process in the Aqua
-# session, or exits 0 when an Aqua-born server already owns the session.
-# KeepAlive={SuccessfulExit=false} is load-bearing for that exit: an
-# unconditional KeepAlive would respawn the job every throttle interval
-# forever while a foreign server holds the socket, exactly the loop this guard
-# replaces, and would never let the guard's "nothing to do" verdict rest.
-launch_agent_guard_path() {
-  printf '%s/bin/fm-remote-herdr-guard.sh' "$FM_ROOT"
+# The login shell execs the same-PID launcher, then the guard, then Herdr.
+# KeepAlive={SuccessfulExit=false} retries crashes and launch failures, but
+# lets the guard's successful "nothing to do" exit rest until the next login.
+launch_agent_start_path() {
+  printf '%s/bin/fm-remote-herdr-launch.sh' "$FM_ROOT"
 }
 
 launch_agent_exec_command() { # <resolved-herdr-path>
   printf 'exec %s %s %s' \
-    "$(launch_agent_shell_quote "$(launch_agent_guard_path)")" \
+    "$(launch_agent_shell_quote "$(launch_agent_start_path)")" \
     "$(launch_agent_shell_quote "$1")" \
     "$(launch_agent_shell_quote "$HERDR_SESSION_NAME")"
 }
@@ -716,7 +717,12 @@ check_herdr_server() {
     birth=$(herdr_server_birth)
     case "$birth" in
       launchd\ *|worker\ *)
-        record herdr-server "ok: session $HERDR_SESSION_NAME is running in the Aqua login session (pid ${birth#* }, ${birth%% *})"
+        if herdr_server_detached; then
+          record herdr-server "ok: session $HERDR_SESSION_NAME is running in the Aqua login session (pid ${birth#* }, ${birth%% *}); detached_server_daemon=true"
+        else
+          record herdr-server "fixable: session $HERDR_SESSION_NAME is running in the Aqua login session but lacks detached_server_daemon=true, so saved machines cannot use it" \
+            "rerun this command with --fix to replace it through the launch agent (its current panes close and the parent firstmate relaunches its mates)"
+        fi
         ;;
       nolsof)
         record herdr-server "human: session $HERDR_SESSION_NAME is running but lsof does not resolve, so its server's birth cannot be proven" \
@@ -807,7 +813,7 @@ write_launch_agent() { # <resolved-login-shell>
     fix_report launchagent failed "cannot publish $LAUNCH_AGENT_PLIST"
     return 1
   fi
-  fix_report launchagent applied "wrote the Aqua-scoped $LAUNCH_AGENT_LABEL launch agent running $(launch_agent_guard_path) for $herdr_bin via $shell -l -c"
+  fix_report launchagent applied "wrote the Aqua-scoped $LAUNCH_AGENT_LABEL launch agent running $(launch_agent_start_path) for $herdr_bin via $shell -l -c"
 }
 
 # Reload rather than plain bootstrap so a rewritten plist replaces a stale
@@ -833,7 +839,7 @@ reload_launch_agent() { # <check-to-report-under>
     return 1
   fi
   if ! wait_for_herdr_server; then
-    fix_report "$report" failed "the herdr server for session $HERDR_SESSION_NAME did not come up inside the Aqua launch agent within 10s"
+    fix_report "$report" failed "the herdr server for session $HERDR_SESSION_NAME did not report Aqua birth and detached_server_daemon=true within 10s"
     return 1
   fi
   fix_report "$report" applied "bootstrapped and started $LAUNCH_AGENT_LABEL in gui/$UID_NUM"

@@ -250,7 +250,7 @@ Both are scoped with `LimitLoadToSessionType=Aqua` and bootstrapped in `gui/<uid
 
 ### How the Herdr launch agent starts its server
 
-The Herdr agent runs [`bin/fm-remote-herdr-guard.sh`](../bin/fm-remote-herdr-guard.sh) through a shell in login mode with separate `-l` and `-c` arguments.
+The Herdr agent runs [`bin/fm-remote-herdr-launch.sh`](../bin/fm-remote-herdr-launch.sh) through a shell in login mode with separate `-l` and `-c` arguments.
 It resolves that shell in this order, so the server inherits the account's own environment:
 
 1. The remote account's executable labeled Directory Services `UserShell`.
@@ -258,6 +258,11 @@ It resolves that shell in this order, so the server inherits the account's own e
 3. `/bin/sh`.
 
 The `gui/<uid>` domain, not the login shell, is what gives that server and every pane it spawns the Aqua audit session and login-keychain access.
+The launcher detaches the Unix session with Perl POSIX, then execs the guard and Herdr without replacing the process PID that launchd supervises.
+Herdr reports `detached_server_daemon:true` when that process leads its Unix session, which saved machines require.
+The launcher does not use Herdr's terminal-dependent client auto-start path or switch its macOS bootstrap context.
+`RunAtLoad` starts the job when the GUI login session loads.
+`KeepAlive={SuccessfulExit=false}` retries a crash or launch failure after the throttle interval.
 A server born in any other session cannot read the login keychain.
 Every claude pane under such a server falls back to a stale plaintext credentials file and reports "Login expired".
 
@@ -265,17 +270,25 @@ Every claude pane under such a server falls back to a stale plaintext credential
 
 Herdr's own SSH remote attach starts a server born in another session when it finds none.
 At boot, that server wins the `fm-remote` socket, because sshd accepts connections before the login session exists.
-The guard is what makes the launch agent converge.
-It acts on whichever server owns the `fm-remote` socket:
+The guard replaces a foreign owner or an Aqua-born server that lacks the detached-daemon capability.
+That replacement closes the session's panes, so the parent firstmate must relaunch its second mates.
+It leaves an Aqua-born detached server alone and exits 0.
+The restart policy lets that successful exit rest instead of respawning against a held socket.
+The guard's [header](../bin/fm-remote-herdr-guard.sh) owns the full decision table, and [`bin/fm-remote-herdr-owner-lib.sh`](../bin/fm-remote-herdr-owner-lib.sh) owns the birth markers.
 
-| Socket owner | Guard action |
-| --- | --- |
-| Nothing | Execs the server in the foreground under launchd. |
-| An Aqua-born server | Exits 0. |
-| Any other (foreign) server | Stops the foreign server and takes the session over, closing its panes so the parent firstmate relaunches its mates into the Aqua-born server. |
+### Add the host to the Herdr sidebar
 
-`KeepAlive={SuccessfulExit=false}` lets that exit 0 rest instead of respawning against a held socket.
-The guard's header owns the decision table, and [`bin/fm-remote-herdr-owner-lib.sh`](../bin/fm-remote-herdr-owner-lib.sh) owns the birth markers it reads.
+After the doctor reports the host ready, run this from the primary's Herdr client:
+
+```sh
+herdr machine add <ssh-alias> --remote-session fm-remote --label <label>
+herdr machine status
+```
+
+Confirm that the saved machine reports reachable.
+If Herdr asks whether to replace the remote server, answer **No**.
+Replacing it through SSH would bypass the Aqua launch agent and close the existing panes.
+Repair the host through the doctor instead, then relaunch its second mates before retrying the saved-machine setup.
 
 ### Other repairs and limits
 
@@ -313,7 +326,7 @@ A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own sym
 | Always required | `git`, `jq`, `herdr`, compatible `tasks-axi`, and `treehouse` |
 | At least one of | `claude`, `codex`, `opencode`, `pi`, `pi-signed`, `grok`, `kimi`, or `omp` |
 | Required when the second mate runs on omp | `omp`, reported as `check omp=` by `fm-remote-doctor.sh --harness omp`, which the launch and recovery gate passes for an omp route |
-| Additionally required on macOS | `lsof`, so the doctor and guard can prove which process owns the session socket |
+| Required on macOS | `lsof`, so the doctor and guard can prove the socket owner's birth, and `perl` with POSIX support for same-PID detachment |
 
 The doctor never checks runtime credentials, because no token-free command proves the selected model is usable, so the first live launch on a new host is the credential check.
 
@@ -698,6 +711,7 @@ bin/fm-test-run.sh tests/fm-remote-job.test.sh
 bin/fm-test-run.sh tests/fm-remote-transport-lanes.test.sh
 bin/fm-test-run.sh tests/fm-remote-doctor.test.sh
 bin/fm-test-run.sh tests/fm-remote-herdr-guard.test.sh
+bin/fm-test-run.sh tests/fm-remote-herdr-launch.test.sh
 bin/fm-test-run.sh tests/fm-project-origin.test.sh
 bin/fm-test-run.sh tests/fm-secondmate-sync.test.sh
 bin/fm-test-run.sh tests/fm-remote-reply.test.sh
@@ -716,6 +730,8 @@ The doctor performs these account-level checks, and they are only ever exercised
 
 So the readiness gate's behavior on a genuine Mac remains an operator-run smoke test.
 The audit-session facts the guard relies on are recorded with their commands in [runtime backend verification](verification/runtime-backends.md#fm-remote-server-birth-and-login-keychain-access).
+The launcher's portable test proves same-PID Unix detachment, inherited environment and descriptors, exit propagation, and crash identity.
+It does not prove a real LaunchAgent's audit context, login-keychain access, restart policy, or Herdr's saved-machine readiness.
 
 ### Real-host smoke test
 
