@@ -424,13 +424,13 @@ test_refused_restart_falls_back_without_claiming_a_reload() {
   pass "T5 a refused restart leaves the mate running and reports an unknown outcome"
 }
 
-# --- T6: a remote mate restarts over the fm-on hop, on the parent's pin -------
+# --- T6: a remote mate restarts over the fm-on hop, on its recorded profile ----
 # The seam decodes what fm-on.sh actually put on the wire, so this pins the
 # host-local command and the profile the PARENT resolved, not a local shortcut.
 # The far side also models the live mate: it answers the persist request that
 # crossed the same hop, on the parent channel, with that request's own token.
-setup_remote_case() {  # <case-dir> <id> <ssh-mode>
-  local dir=$1 id=$2 mode=$3
+setup_remote_case() {  # <case-dir> <id> <ssh-mode> [harness] [model] [effort]
+  local dir=$1 id=$2 mode=$3 harness=${4:-claude} model=${5-default} effort=${6-default}
   local fb="$dir/fakebin"
   mkdir -p "$dir/$id-home"
   {
@@ -438,12 +438,12 @@ setup_remote_case() {  # <case-dir> <id> <ssh-mode>
     echo "endpoint_task_id=$id"
     echo "worktree=$dir/$id-home"
     echo "project=$dir/$id-home"
-    echo "harness=claude"
+    echo "harness=$harness"
     echo "kind=secondmate"
     echo "mode=secondmate"
     echo "yolo=off"
-    echo "model=default"
-    echo "effort=default"
+    echo "model=$model"
+    echo "effort=$effort"
     echo "home=$dir/$id-home"
     echo "remote_host=remote-mac"
     echo "remote_backend=herdr"
@@ -508,27 +508,43 @@ SH
 test_remote_mate_restarts_over_the_transport_hop() {
   local dir out rc relaunch_line
   dir=$(new_case remote)
-  setup_remote_case "$dir" sm2 ok
+  setup_remote_case "$dir" sm2 ok codex big-model high
   export FM_FAKE_ANSWER_STATUS="$dir/home/state/sm2.status"
-  # The parent's own pin is what the replacement must run on; the remote home's
-  # copy of config/secondmate-harness is a different home's file.
-  printf 'codex big-model high\n' > "$dir/home/config/secondmate-harness"
+  # This home's pin names another runtime; the route keeps the profile its own
+  # record names, which is what launch or the last relaunch established.
+  printf 'omp other-model low\n' > "$dir/home/config/secondmate-harness"
 
   out=$(run_restart "$dir" fm-sm2); rc=$?
   unset FM_FAKE_ANSWER_STATUS
 
   expect_code 0 "$rc" "a remote mate should restart over its transport hop"$'\n'"$out"
   assert_contains "$out" "restarted: sm2 on remote-mac (codex)" \
-    "a remote restart should be reported with its host and the parent's pinned runtime"
+    "a remote restart should be reported with its host and the route's recorded runtime"
   relaunch_line=$(grep '^fm-remote-secondmate-control.sh relaunch' "$dir/ssh.log" | head -1)
   [ -n "$relaunch_line" ] || fail "no relaunch crossed the transport hop"$'\n'"$(cat "$dir/ssh.log")"
   [ "$relaunch_line" = "fm-remote-secondmate-control.sh relaunch sm2 codex big-model high" ] \
-    || fail "the host-local relaunch did not carry the parent's resolved profile: $relaunch_line"
+    || fail "the host-local relaunch did not carry the route's recorded profile: $relaunch_line"
   # The persist request crossed the SAME hop before the restart did.
   [ "$(grep -n '^fm-remote-secondmate-control.sh send' "$dir/ssh.log" | head -1 | cut -d: -f1)" \
      -lt "$(grep -n '^fm-remote-secondmate-control.sh relaunch' "$dir/ssh.log" | head -1 | cut -d: -f1)" ] \
     || fail "the remote mate was restarted before it was asked to persist"$'\n'"$(cat "$dir/ssh.log")"
-  pass "T6 a remote mate restarts through the host-local control plane over the fm-on hop"
+  pass "T6 a remote mate restarts on its recorded profile over the fm-on hop"
+}
+
+# --- T6b: a route record whose effort is not verified is never restarted ------
+test_remote_restart_refuses_unverified_recorded_effort() {
+  local dir out rc
+  dir=$(new_case remote-bad-effort)
+  setup_remote_case "$dir" sm2 ok omp '' turbo
+
+  out=$(run_restart "$dir" sm2); rc=$?
+
+  expect_code 3 "$rc" "an unverified recorded effort must not be restarted"$'\n'"$out"
+  if grep -q '^fm-remote-secondmate-control.sh relaunch' "$dir/ssh.log"; then
+    fail "a route with an unverified recorded effort was relaunched onto a changed profile"
+  fi
+  assert_contains "$out" "effort 'turbo'" "the refusal must name the recorded effort"
+  pass "T6b a route record with an unverified effort falls back instead of changing its profile"
 }
 
 # --- T7: an unreachable host is unknown, never a claimed reload --------------
@@ -581,9 +597,8 @@ test_native_ultra_restart_keeps_local_and_remote_profiles() {
   assert_contains "$(cat "$dir/fake/literal")" "--codex-effort 'ultra'" "local restart dropped native launch flag"
 
   dir=$(new_case native-remote)
-  setup_remote_case "$dir" sm2 ok
+  setup_remote_case "$dir" sm2 ok pi-signed codex-native/gpt-6-astra ultra
   export FM_FAKE_ANSWER_STATUS="$dir/home/state/sm2.status"
-  printf 'pi-signed codex-native/gpt-6-astra ultra\n' > "$dir/home/config/secondmate-harness"
   out=$(run_restart "$dir" sm2); rc=$?
   unset FM_FAKE_ANSWER_STATUS
   expect_code 0 "$rc" "native remote restart failed: $out"
@@ -857,6 +872,7 @@ test_refused_restart_falls_back_without_claiming_a_reload
 test_local_restart_uses_the_home_pin_and_reports_what_ran
 test_native_ultra_restart_keeps_local_and_remote_profiles
 test_remote_mate_restarts_over_the_transport_hop
+test_remote_restart_refuses_unverified_recorded_effort
 test_unreachable_host_is_reported_unknown
 test_concurrent_reply_cannot_release_persist_gate
 test_persist_waits_are_polled_together

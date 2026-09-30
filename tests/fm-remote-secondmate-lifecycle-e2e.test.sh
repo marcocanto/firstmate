@@ -1223,6 +1223,12 @@ RELAUNCH_CHECKPOINT=$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-c
   relaunch ios codex - - 2>&1) && fail "a restart with no accountable checkout should refuse"
 assert_contains "$RELAUNCH_CHECKPOINT" 'refusing to relaunch without a checkout whose unlanded work can be accounted for' \
   "the host-local restart did not reach the control plane's own pre-stop checkpoint"
+# omp is an allowed remote runtime, so its restart passes the remote verb's own
+# gate and reaches the same pre-stop checkpoint rather than being refused.
+RELAUNCH_OMP=$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh \
+  relaunch ios omp - - 2>&1) && fail "an omp restart with no accountable checkout should refuse"
+assert_contains "$RELAUNCH_OMP" 'refusing to relaunch without a checkout whose unlanded work can be accounted for' \
+  "an omp remote restart did not reach the control plane's own pre-stop checkpoint"
 cp "$TMP_ROOT/ios-before-relaunch.meta" "$RELAUNCH_ROUTE_META"
 [ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh state ios)" = alive ] \
   || fail "a refused remote restart must leave the running agent untouched"
@@ -1259,7 +1265,11 @@ pass "startup repairs remote readiness before probing without relaunching"
 remote_route_meta="$REMOTE_HOME/state/parent-route/ios.meta"
 WATCH_STATE="$TMP_ROOT/watch-liveness-state"
 mkdir -p "$WATCH_STATE"
-cp "$PARENT/state/ios.meta" "$WATCH_STATE/ios.meta"
+# A route moved by bin/fm-remote-secondmate-relaunch.sh onto no model or effort
+# pin records the host's literal "default" for both axes; recovery must read
+# that as no pin rather than refuse the recorded effort.
+sed -e 's/^model=.*/model=default/' -e 's/^effort=.*/effort=default/' \
+  "$PARENT/state/ios.meta" > "$WATCH_STATE/ios.meta"
 # The remote spawn path mints its inheritance generation from a counter that
 # lives beside the task record, so the dedicated watch state needs the real
 # one; otherwise the pushed payload reads as superseded on the remote home.
@@ -1275,6 +1285,10 @@ jq --arg p "$ios_pane" \
   "$HERDR_STATE" > "$TMP_ROOT/herdr-dead.json" && mv "$TMP_ROOT/herdr-dead.json" "$HERDR_STATE"
 [ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh state ios)" = dead ] \
   || fail "the agent-free remote pane did not classify dead"
+# The route was launched on codex. Point this home's secondmate pin at another
+# runtime so a recovery that re-resolved config instead of reusing the route's
+# own record would move the mate.
+printf 'claude\n' > "$PARENT/config/secondmate-harness"
 
 tabs_before=$(grep -c '^tab create' "$HERDR_LOG" || true)
 # exec keeps $! the watcher itself rather than the function's subshell, so a
@@ -1316,12 +1330,17 @@ assert_grep '- ios ' "$PARENT/data/secondmates.md" \
   "the watcher relaunch changed the registry route"
 [ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh state ios)" = alive ] \
   || fail "the auto-relaunched remote endpoint did not read alive"
+assert_grep 'harness=codex' "$WATCH_STATE/ios.meta" \
+  "the watcher relaunch moved the parent route record off its recorded runtime"
+assert_grep 'harness=codex' "$remote_route_meta" \
+  "the watcher relaunch launched the remote mate on a runtime other than its recorded one"
+printf 'codex\n' > "$PARENT/config/secondmate-harness"
 # Production relaunch updates the parent route meta and inheritance generation
 # in place; the dedicated watch state above kept the rest of this suite's
 # parent state out of scope, so fold both records back now.
 cp "$WATCH_STATE/ios.meta" "$PARENT/state/ios.meta"
 cp "$WATCH_STATE/.remote-inherit-ios.generation" "$PARENT/state/" 2>/dev/null || true
-pass "watch liveness: a dead remote secondmate is auto-relaunched on its own host with one wake"
+pass "watch liveness: a dead remote secondmate is auto-relaunched on its own host and recorded runtime with one wake"
 
 # Host loss mid-supervision is never evidence of death: the same tick on an
 # unreachable route probes, preserves, and stays silent.

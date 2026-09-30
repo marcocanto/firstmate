@@ -2,7 +2,7 @@
 # Check, and optionally repair, one remote account's second-mate readiness.
 #
 # Usage:
-#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix]
+#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix] [--harness omp]
 #
 # Run it through fm-on.sh so the fixed entrypoint invokes this readiness owner
 # over its plain SSH bootstrap. The command reports the same filesystem-composed
@@ -25,6 +25,16 @@
 # invokable over the plain-SSH bootstrap path to inspect and repair that worker.
 # SSH cannot create an Aqua session, so a host with no GUI login is a human
 # gap rather than something --fix attempts to bypass.
+#
+# --harness omp names the runtime the second mate will launch on and adds that
+# runtime's own check: the omp CLI must resolve on the runtime PATH, because the
+# host-local spawn resolves it there. The launch and recovery gate passes it
+# (bin/fm-remote-readiness-lib.sh). omp credentials are not checked: no
+# token-free omp command proves that the selected model is usable, and a stored
+# login is not the only way omp authenticates, so a credential gap here would
+# refuse working hosts. The live pane launch is the credential proof. Every
+# other runtime has no runtime-specific check, so its gate call stays
+# harness-agnostic.
 #
 # Line protocol, one fact per line, stable for script consumers:
 #   mode=check|fix
@@ -68,7 +78,7 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(CDPATH='' cd "$SCRIPT_DIR/.." && pwd -P)}"
 # shellcheck source=bin/fm-remote-herdr-owner-lib.sh
 . "$SCRIPT_DIR/fm-remote-herdr-owner-lib.sh"
 REQUIRED_TOOLS=(git jq herdr tasks-axi treehouse)
-HARNESS_TOOLS=(claude codex opencode pi pi-signed grok kimi)
+HARNESS_TOOLS=(claude codex opencode pi pi-signed grok kimi omp)
 OPTIONAL_TOOLS=(tmux no-mistakes gh)
 LAUNCH_AGENT_LABEL=dev.firstmate.herdr.fm-remote
 # The dedicated remote-secondmate session. The user's interactive Herdr work
@@ -84,17 +94,30 @@ ENTRYPOINT_LINK="${HOME:-}/.local/bin/fm-remote-entrypoint.sh"
 usage() { sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 MODE=check
-case "${1:-}" in
-  '') ;;
-  --fix) MODE=fix; shift ;;
-  --worker-tool-probe)
-    [ "${FM_REMOTE_JOB_ACTIVE:-}" = 1 ] || { printf 'error: worker tool probe requires the remote job worker\n' >&2; exit 64; }
-    MODE='worker-tool-probe'
-    shift
-    ;;
-  *) usage ;;
-esac
-[ "$#" -eq 0 ] || usage
+SELECTED_HARNESS=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --fix)
+      [ "$MODE" = check ] || usage
+      MODE=fix
+      ;;
+    --worker-tool-probe)
+      [ "${FM_REMOTE_JOB_ACTIVE:-}" = 1 ] || { printf 'error: worker tool probe requires the remote job worker\n' >&2; exit 64; }
+      [ "$MODE" = check ] || usage
+      MODE='worker-tool-probe'
+      ;;
+    --harness)
+      [ "$#" -ge 2 ] && [ -z "$SELECTED_HARNESS" ] || usage
+      case "$2" in
+        omp) SELECTED_HARNESS=$2 ;;
+        *) printf 'error: no runtime-specific readiness check exists for harness: %s\n' "$2" >&2; exit 2 ;;
+      esac
+      shift
+      ;;
+    *) usage ;;
+  esac
+  shift
+done
 
 PLATFORM=$(fm_remote_job_platform)
 UID_NUM=$(id -u 2>/dev/null) || UID_NUM=
@@ -580,6 +603,27 @@ check_herdr() {
     "install herdr from https://herdr.dev on that account, or add a ~/.local/bin wrapper for it; a remote second mate always runs on the Herdr backend"
 }
 
+# The selected omp runtime must resolve on this PATH, which the host-local
+# spawn shares, because that spawn launches the omp it resolves here. A
+# version-manager install --fix can wrap is fixable; anything else is an install
+# only a person at that account can do.
+check_omp() {
+  local resolved target
+  [ "$SELECTED_HARNESS" = omp ] || return 0
+  resolved=$(command -v omp 2>/dev/null || true)
+  if [ -n "$resolved" ] && [ -x "$resolved" ]; then
+    record omp "ok: $resolved"
+    return 0
+  fi
+  if target=$(fm_remote_job_manager_tool "${HOME:-}" omp 2>/dev/null); then
+    record omp "fixable: omp is installed at $target but does not resolve on the remote runtime PATH" \
+      "rerun this command with --fix to add a Firstmate-owned ~/.local/bin wrapper for it"
+    return 0
+  fi
+  record omp "human: the omp CLI does not resolve on the remote runtime PATH" \
+    "install Oh My Pi on that account so omp resolves on the path reported above, or put a wrapper script for it in ${HOME:-~}/.local/bin; see docs/remote-secondmates.md for the wrapper recipe"
+}
+
 check_gui_session() {
   if [ "$PLATFORM" != darwin ]; then
     record gui-session "skip: no Aqua login session applies on $PLATFORM"
@@ -729,6 +773,7 @@ run_checks() { # <resolved-login-shell>
   check_launch_agent "$shell"
   check_herdr_server
   check_entrypoint_link
+  check_omp
 }
 
 # --- repairs ----------------------------------------------------------------
@@ -873,6 +918,7 @@ apply_fixes() { # <resolved-login-shell>
         start_herdr_server || true
         ;;
       entrypoint-link) link_entrypoint || true ;;
+      omp) repair_tool_wrapper omp || true ;;
     esac
   done
 }

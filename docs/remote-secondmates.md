@@ -285,6 +285,7 @@ The guard's header owns the decision table, and [`bin/fm-remote-herdr-owner-lib.
 - It recreates the `~/.local/bin/fm-remote-entrypoint.sh` symlink when it is absent.
 - It creates only Firstmate-owned required-tool wrappers that it can prove resolve to a version-manager target.
   It stops after one harness satisfies the at-least-one requirement, which is the harness line of the [required remote tools](#required-remote-tools).
+  When the launch runs on omp, it also creates that wrapper for a version-manager install of omp.
 
 Its limits:
 
@@ -310,8 +311,11 @@ A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own sym
 | Requirement | Tools |
 | --- | --- |
 | Always required | `git`, `jq`, `herdr`, compatible `tasks-axi`, and `treehouse` |
-| At least one of | `claude`, `codex`, `opencode`, `pi`, `pi-signed`, `grok`, or `kimi` |
+| At least one of | `claude`, `codex`, `opencode`, `pi`, `pi-signed`, `grok`, `kimi`, or `omp` |
+| Required when the second mate runs on omp | `omp`, reported as `check omp=` by `fm-remote-doctor.sh --harness omp`, which the launch and recovery gate passes for an omp route |
 | Additionally required on macOS | `lsof`, so the doctor and guard can prove which process owns the session socket |
+
+The doctor never checks runtime credentials, because no token-free command proves the selected model is usable, so the first live launch on a new host is the credential check.
 
 ## Provision a route
 
@@ -414,6 +418,8 @@ bin/fm-spawn.sh <id> --secondmate
 The primary then takes these steps:
 
 1. It resolves the verified secondmate harness and optional model and effort.
+   A route that already has a record in this home reuses the harness, model, and effort that record names, so recovery and restart keep the runtime the route was launched or last relaunched with; only a new route resolves `config/secondmate-harness`, and an explicit `--harness`, `--model`, or `--effort` still wins.
+   A record that names no harness is refused rather than re-resolved.
 2. It runs the same readiness gate the seed runs.
 3. It transfers the inherited-material allowlist.
 4. It asks the remote host to launch on Herdr in `fm-remote`.
@@ -621,11 +627,14 @@ A live remote second mate is restarted with `relaunch`, which runs the ordinary 
 The endpoint record there was written by a host-local launch and carries no remote placement.
 So the transaction, its checkpoint, and its postconditions are the local ones.
 
-The primary passes `<harness> <model|default|-> <effort|default|->` explicitly, using `default` when an axis has no parent pin.
+The primary passes `<harness> <model|default|-> <effort|default|->` explicitly, using `default` when an axis has no pin.
 It passes them explicitly because `config/secondmate-harness` is not inherited into a second mate's home, and the file on that host belongs to a different home.
 Letting the far side re-resolve it would silently move the mate onto another runtime.
+The `/updatefirstmate` restart passes the profile the primary's route record names, the same one [launch or recover](#launch-or-recover) reuses.
 SSH exit 255 leaves completion unknown and the route preserved, exactly as every other verb here.
-Move a live remote second mate onto a newly pinned harness, model, or effort with [`bin/fm-remote-secondmate-relaunch.sh`](../bin/fm-remote-secondmate-relaunch.sh) rather than calling `relaunch` through `fm-on.sh` directly: the host-local relaunch it drives can only rewrite the host's own endpoint record, so this wrapper reads the confirmed identity back from that record afterward and republishes the primary's own route metadata to match, the same way launch already records a fresh route.
+Move a live remote second mate onto another harness, model, or effort with [`bin/fm-remote-secondmate-relaunch.sh`](../bin/fm-remote-secondmate-relaunch.sh) rather than calling `relaunch` through `fm-on.sh` directly: the host-local relaunch it drives can only rewrite the host's own endpoint record, so this wrapper reads the confirmed identity back from that record afterward and republishes the primary's own route metadata to match, the same way launch already records a fresh route.
+A move onto omp first runs the same `--harness omp` host readiness gate as launch, including its `--fix` repair, because the host-local relaunch stops the running agent before it launches the replacement; a host still unready refuses with that doctor's gap text, SSH exit 255 reports readiness unknown, and either way the running mate and both records stay untouched.
+Later recovery and restart reuse that republished record, so one relaunch is enough to switch the route.
 
 ### Firstmate code convergence
 

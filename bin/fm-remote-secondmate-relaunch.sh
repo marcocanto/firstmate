@@ -29,6 +29,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-backend.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
+# shellcheck source=bin/fm-remote-readiness-lib.sh
+. "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 usage() { sed -n '2,4p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
@@ -46,6 +48,22 @@ REMOTE_HOST=$(fm_meta_get "$META" remote_host)
 [ -n "$REMOTE_HOST" ] \
   || die "task $ID is not a remotely placed secondmate; use bin/fm-control.sh $ID relaunch instead"
 
+# The host-local relaunch stops the running agent before it launches the
+# replacement, so an omp host gap must refuse here, while the mate still runs.
+if [ "$HARNESS" = omp ]; then
+  rc=0
+  fm_remote_readiness_ensure "$SCRIPT_DIR" "$ID" "$HARNESS" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 255 ]; then
+      printf 'error: remote secondmate %s readiness could not be confirmed; relaunch not attempted\n' "$ID" >&2
+    else
+      printf 'error: remote secondmate %s host %s is not ready for omp; relaunch refused\n' "$ID" "$REMOTE_HOST" >&2
+    fi
+    [ -z "$FM_REMOTE_READINESS_OUT" ] || printf '%s\n' "$FM_REMOTE_READINESS_OUT" >&2
+    exit "$rc"
+  fi
+fi
+
 RELAUNCH_OUT=$("$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-secondmate-control.sh \
   relaunch "$ID" "$HARNESS" "$MODEL" "$EFFORT" </dev/null 2>&1) || {
   rc=$?
@@ -56,9 +74,9 @@ printf '%s\n' "$RELAUNCH_OUT"
 
 # The confirmed identity comes from the route block the host prints after a
 # successful relaunch, never from the human-readable "relaunched ..." summary
-# line: a relaunch onto "default" prints that literal word there, while the
-# endpoint's own record - and this parent's, to match it - store an empty
-# field for "no explicit pin".
+# line. That block mirrors the endpoint's own record, which stores an absent
+# pin as the literal "default"; bin/fm-spawn.sh reads that recorded word as no
+# pin when it recovers the route.
 [ "$(printf '%s\n' "$RELAUNCH_OUT" | sed -n 's/^schema=//p' | tail -1)" \
   = fm-remote-secondmate-control.v1 ] \
   || die "the host relaunched $ID but reported no route confirmation to record"

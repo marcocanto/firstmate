@@ -822,6 +822,50 @@ assert_contains "$DOCTOR_OUT" 'fix required-treehouse=failed:' \
   || fail "--fix overwrote an operator-owned wrapper"
 pass "--fix creates only owned version-manager wrappers and never clobbers an operator file"
 
+# --- --harness omp: the selected omp runtime must resolve on this PATH -------
+# omp is the one runtime with its own readiness check. Credentials are
+# deliberately not checked, so these cases pin only binary resolution.
+
+new_case Linux with-herdr no-gui
+doctor --fix
+expect_code 0 "$DOCTOR_RC" "the baseline fixture was not ready"$'\n'"$DOCTOR_OUT"
+doctor --harness omp
+expect_code 1 "$DOCTOR_RC" "a host without omp was reported ready for an omp second mate"
+assert_contains "$DOCTOR_OUT" 'check omp=human: the omp CLI does not resolve on the remote runtime PATH' \
+  "a missing omp install was not reported as a human gap"
+assert_contains "$DOCTOR_OUT" 'action: omp: install Oh My Pi' "the omp gap carried no operator action"
+assert_contains "$DOCTOR_OUT" "required harness=claude:$CASE_BIN/claude" \
+  "the harness-agnostic requirement changed under --harness omp"
+
+MANAGER_BIN="$CASE_HOME/.nvm/versions/node/v24/bin"
+mkdir -p "$MANAGER_BIN"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$MANAGER_BIN/omp"
+chmod +x "$MANAGER_BIN/omp"
+doctor --harness omp
+expect_code 1 "$DOCTOR_RC" "a version-manager-only omp was reported ready"
+assert_contains "$DOCTOR_OUT" "check omp=fixable: omp is installed at $MANAGER_BIN/omp but does not resolve on the remote runtime PATH" \
+  "a wrappable omp install was not reported as fixable"
+doctor --fix --harness omp
+expect_code 0 "$DOCTOR_RC" "--fix did not make a version-manager omp resolve"$'\n'"$DOCTOR_OUT"
+assert_contains "$DOCTOR_OUT" 'fix required-omp=applied:' "--fix did not report the omp wrapper"
+assert_contains "$DOCTOR_OUT" "check omp=ok: $CASE_HOME/.local/bin/omp" \
+  "the post-repair check did not resolve the omp wrapper"
+assert_grep '# Firstmate remote tool wrapper v1' "$CASE_HOME/.local/bin/omp" \
+  "the omp wrapper is not marked Firstmate-owned"
+
+rm -f "$CASE_BIN/claude"
+doctor
+expect_code 0 "$DOCTOR_RC" "an omp-only host failed the harness-agnostic requirement"$'\n'"$DOCTOR_OUT"
+assert_contains "$DOCTOR_OUT" "required harness=omp:$CASE_HOME/.local/bin/omp" \
+  "omp did not satisfy the at-least-one harness requirement"
+assert_not_contains "$DOCTOR_OUT" 'check omp=' "the omp check ran without --harness omp"
+
+doctor --harness claude
+expect_code 2 "$DOCTOR_RC" "a runtime with no runtime-specific check was accepted"
+assert_contains "$DOCTOR_OUT" 'no runtime-specific readiness check exists for harness: claude' \
+  "the refusal did not name the unsupported runtime"
+pass "--harness omp reports omp resolution as human or fixable, --fix wraps a managed omp, and omp alone satisfies the harness requirement"
+
 new_case Linux with-herdr no-gui
 CASE_REMOTE_JOB_ACTIVE=
 CASE_PLATFORM_OVERRIDE=Linux
