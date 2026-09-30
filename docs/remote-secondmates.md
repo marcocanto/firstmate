@@ -633,6 +633,7 @@ Letting the far side re-resolve it would silently move the mate onto another run
 The `/updatefirstmate` restart passes the profile the primary's route record names, the same one [launch or recover](#launch-or-recover) reuses.
 SSH exit 255 leaves completion unknown and the route preserved, exactly as every other verb here.
 Move a live remote second mate onto another harness, model, or effort with [`bin/fm-remote-secondmate-relaunch.sh`](../bin/fm-remote-secondmate-relaunch.sh) rather than calling `relaunch` through `fm-on.sh` directly: the host-local relaunch it drives can only rewrite the host's own endpoint record, so this wrapper reads the confirmed identity back from that record afterward and republishes the primary's own route metadata to match, the same way launch already records a fresh route.
+A move onto omp first runs the same `--harness omp` host readiness gate as launch, including its `--fix` repair, because the host-local relaunch stops the running agent before it launches the replacement; a host still unready refuses with that doctor's gap text, SSH exit 255 reports readiness unknown, and either way the running mate and both records stay untouched.
 Later recovery and restart reuse that republished record, so one relaunch is enough to switch the route.
 
 ### Firstmate code convergence
