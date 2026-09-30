@@ -1,0 +1,46 @@
+# [17:54:03] omp omp/18.4.3 (openai-codex/gpt-6-astra) via tmux, extension=new launched in $TMPDIR/fm-idlewake-new.8ZpMMM
+# [17:54:24] watcher armed (pid 83395)
+# [17:54:30] idle precondition held: idle=true last=custom_message/advisor; idling 190s
+# [17:57:46] watcher closed on the idle wake; durable rows=3
+# [17:57:46] idle wake started a turn 6s after its status line
+# [17:58:29] durable queue drained; omp idle
+# [17:58:35] mid-run wake closed while omp was busy
+# [17:59:43] probe log (message order):
+#   user Reply with exactly LAB-READY and nothing else. Do not run an
+#   reply LAB-READY
+#   user Reply with exactly NOTE-READY and nothing else. Do not run a
+#   reply NOTE-READY
+#   note
+#   wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: in
+#   reply Captain, the lab idle-wake task reported completion. Its parent notification could not be delivered because the parent connection record is missing or unreadable.
+#   wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /
+#   reply Captain, shipshape.
+#   user Use the bash tool to run exactly this command and nothing el
+#   reply LONGTURN-DONE
+#   wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: in
+#   reply Captain, the lab mid-run wake reported completion. Its parent notification could not be delivered because the parent connection record is missing or unreadable.
+#   wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /
+#   reply Captain, shipshape.
+# final pane:
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    Reading state and skill paths
+#    Captain, the lab idle-wake task reported completion. Its parent notification could not be delivered because the parent connection record is missing or
+#    unreadable.
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: $TMPDIR/fm-idlewake-new.8ZpMMM/root/state/labtask.status
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    Captain, shipshape.
+#    Use the bash tool to run exactly this command and nothing else: sleep 40 ; echo LONGTURN-SLEPT . After it returns, reply with exactly LONGTURN-DONE and
+#    nothing else.
+#    LONGTURN-DONE
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    Captain, the lab mid-run wake reported completion. Its parent notification could not be delivered because the parent connection record is missing or
+#    unreadable.
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: $TMPDIR/fm-idlewake-new.8ZpMMM/root/state/labtask.status
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    Captain, shipshape.
+#   ❯
+#    󰵗 · 󰪟 GPT-6-Astra ·  fm-idlewake-new.8ZpMMM/root ·  9.0%/272K 󰁨 · 󰙺 0.93                                                     Reply with Exact LAB-READY Text
+ok - omp omp/18.4.3 (openai-codex/gpt-6-astra) via tmux, extension=new: wake started a turn after 190s idle behind an advisor note; mid-run wake followed the run final reply; queue drained with no key
+exit=0

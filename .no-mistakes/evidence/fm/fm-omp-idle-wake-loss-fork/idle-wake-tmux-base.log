@@ -1,0 +1,51 @@
+# [17:54:03] omp omp/18.4.3 (openai-codex/gpt-6-astra) via tmux, extension=base launched in $TMPDIR/fm-idlewake-base.mAvuFT
+# [17:54:25] watcher armed (pid 84845)
+# [17:54:34] idle precondition held: idle=true last=custom_message/advisor; idling 190s
+# [17:57:49] watcher closed on the idle wake; durable rows=3
+# [17:58:53] after 60s: rows=3 idle=true last=custom_message/advisor
+#     Advisor 0 notes
+#   
+#   ❯
+#    󰵗 · 󰪟 GPT-6-Astra ·  fm-idlewake-base.mAvuFT/root ·  7.5%/272K 󰁨 · 󰙺 0.23                                                    Reply With Exact LAB-READY Text
+#   
+#   
+#   
+#   
+#   
+#   
+#   
+#   
+not ok - omp omp/18.4.3 (openai-codex/gpt-6-astra) via tmux, extension=base: after 190s idle behind an advisor note, the wake started no turn within 60s (3 durable rows, idle=true last=custom_message/advisor)
+# pane:
+#    Reply with exactly LAB-READY and nothing else. Do not run any tool.
+#   
+#   
+#    Reviewing override language
+#   
+#    LAB-READY
+#   
+#   
+#    Reply with exactly NOTE-READY and nothing else. Do not run any tool.
+#   
+#   
+#    NOTE-READY
+#   
+#     Advisor 0 notes
+#   
+#   ❯
+#    󰵗 · 󰪟 GPT-6-Astra ·  fm-idlewake-base.mAvuFT/root ·  7.5%/272K 󰁨 · 󰙺 0.23                                                    Reply With Exact LAB-READY Text
+#   
+#   
+#   
+#   
+#   
+#   
+#   
+#   
+# probe log:
+#   user Reply with exactly LAB-READY and nothing else. Do not run an
+#   reply LAB-READY
+#   user Reply with exactly NOTE-READY and nothing else. Do not run a
+#   reply NOTE-READY
+#   note
+exit=1
