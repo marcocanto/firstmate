@@ -1,0 +1,44 @@
+[19:06:53 base2] home $TMPDIR//fm-lab.dwYzDe from 099d40b9; omp omp/18.4.4; model openai-codex/gpt-6-astra
+[19:07:13 base2] watcher armed pid 99581
+[19:07:42 base2] precondition held: idle=true last=custom_message/advisor; idling 190s
+[19:10:52 base2] after idle: idle=true last=custom_message/advisor; wakes started so far: 1
+[19:10:55 base2] watcher closed on the wake; queue rows 3
+[19:12:03 base2] FAIL wake started no turn within 60s after 190s idle behind the advisor note (rows 3, idle=true last=custom_message/advisor)
+[19:12:03 base2] FINAL probe: idle=true last=custom_message/advisor; queue rows: 3
+[19:12:03 base2] probe log:
+    user Reply with exactly LAB-READY and nothing else. Do not run an
+    reply LAB-READY
+    wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: re
+    reply Captain, I handled the queued notification. The checks finished but reported two "not a git repository" errors, so I cannot confirm that the local copy refresh succeeded. No project work is running.
+    user Reply with exactly NOTE-READY and nothing else. Do not run a
+    reply NOTE-READY
+    note
+[19:12:03 base2] pane tail:
+    │          ▒▒  ██          │ LSP Servers                                                           │
+    │              ██          │ No LSP servers                                                        │
+    │                          │                                                                       │
+    │       GPT-6-Astra        │                                                                       │
+    │       openai-codex       │                                                                       │
+    │                          │ ───────────────────────────────────────────────────────────────────── │
+    │                          │ Recent sessions                                                       │
+    │                          │ No recent sessions                                                    │
+    │                          │                                                                       │
+    │                          │                                                                       │
+    │                          │                                                                       │
+    │                          │                                                                       │
+    ╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+     Tip: Hit a Codex rate limit? `/usage reset` spends a saved reset credit to immediately restore your
+          quota
+     Reply with exactly LAB-READY and nothing else. Do not run any tool.
+     LAB-READY
+     ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: rearm-resurface
+     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+     Captain, I handled the queued notification. The checks finished but reported two "not a git repository" errors, so I cannot confirm that the local copy refresh succeeded. No project work is running.
+     Reply with exactly NOTE-READY and nothing else. Do not run any tool.
+     NOTE-READY
+      Advisor 0 notes
+    ❯
+     󰵗 · 󰪟 GPT-6-Astra ·  fm-lab.dwYzDe ·  9.5%/272K 󰁨 · 󰙺 0.44                                                                                                       Return the Exact LAB-READY Response
+rm: $TMPDIR//fm-lab.dwYzDe/state: Directory not empty
+rm: $TMPDIR//fm-lab.dwYzDe: Directory not empty
+base2_exit=1

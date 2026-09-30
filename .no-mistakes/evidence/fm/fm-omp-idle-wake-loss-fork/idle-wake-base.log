@@ -1,0 +1,43 @@
+[18:58:50 base] home $TMPDIR//fm-lab.uCpIxR from 099d40b9; omp omp/18.4.4; model openai-codex/gpt-6-astra
+[18:59:10 base] watcher armed pid 47468
+[18:59:50 base] precondition held: idle=true last=custom_message/advisor; idling 190s
+[19:03:00 base] after idle: idle=true last=custom_message/advisor; wakes started so far: 1
+[19:03:03 base] watcher closed on the wake; queue rows 3
+[19:03:03 base] PASS idle wake started a turn 3s after the status line
+[19:06:18 base] queue NOT drained (3 rows)
+[19:06:18 base] FINAL probe: idle=true last=custom_message/advisor; queue rows: 3
+[19:06:18 base] probe log:
+    user Reply with exactly LAB-READY and nothing else. Do not run an
+    reply LAB-READY
+    wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: re
+    reply Captain, the background checks finished, but Git reported twice that the directory is not a repository. I acknowledged the notification. No active work needs action, and I left extension-owned monitoring unchanged.
+    user Reply with exactly NOTE-READY and nothing else. Do not run a
+    reply NOTE-READY
+    note
+[19:06:18 base] pane tail:
+    │       GPT-6-Astra        │                                                                       │
+    │       openai-codex       │                                                                       │
+    │                          │ ───────────────────────────────────────────────────────────────────── │
+    │                          │ Recent sessions                                                       │
+    │                          │ No recent sessions                                                    │
+    │                          │                                                                       │
+    │                          │                                                                       │
+    │                          │                                                                       │
+    │                          │                                                                       │
+    ╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+     Tip: Try starting your prompt with a ->, and writing a list (1. Do X, 2. Do Y)
+     Reply with exactly LAB-READY and nothing else. Do not run any tool.
+     LAB-READY
+     ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: rearm-resurface
+     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+     Loading diagnostic bootstrap
+     Acknowledging report
+     Captain, the background checks finished, but Git reported twice that the directory is not a repository. I acknowledged the notification. No active work needs action, and I left extension-owned
+     monitoring unchanged.
+     Reply with exactly NOTE-READY and nothing else. Do not run any tool.
+     NOTE-READY
+      Advisor 0 notes
+     ※ recap: Captain, the exact LAB-READY reply is complete, and the latest NOTE-READY request is also complete. No further action is needed.
+    ❯
+     󰵗 · 󰪟 GPT-6-Astra ·  fm-lab.uCpIxR ·  9.5%/272K 󰁨 · 󰙺 0.45                                                                                                           Reply With Exact LAB-READY Text
+base_exit=0

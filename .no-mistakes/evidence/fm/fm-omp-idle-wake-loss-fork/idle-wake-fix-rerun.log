@@ -1,0 +1,53 @@
+[19:06:49 fix2] home $TMPDIR//fm-lab.Ul3xZ6 from 2350b8f6; omp omp/18.4.4; model openai-codex/gpt-6-astra
+[19:07:12 fix2] watcher armed pid 96524
+[19:07:48 fix2] precondition held: idle=true last=custom_message/advisor; idling 190s
+[19:10:58 fix2] after idle: idle=true last=custom_message/advisor; wakes started so far: 1
+[19:11:01 fix2] watcher closed on the wake; queue rows 3
+[19:11:01 fix2] PASS idle wake started a turn 3s after the status line
+[19:11:25 fix2] queue drained
+[19:11:53 fix2] mid-run wake closed while long turn running (LONGTURN-DONE seen yet: no)
+[19:12:28 fix2] mid-run ordering: ok (ok = wake started only after the run's final reply)
+[19:12:43 fix2] mid-run queue drained
+[19:12:43 fix2] FINAL probe: idle=false last=message/toolResult; queue rows: 0
+[19:12:43 fix2] probe log:
+    user Reply with exactly LAB-READY and nothing else. Do not run an
+    reply LAB-READY
+    wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: re
+    reply Captain, the startup checks finished, but two Git operations reported "not a git repository." Project refresh is therefore not confirmed. No work is under way, and I made no project changes.
+    user Reply with exactly NOTE-READY and nothing else. Do not run a
+    reply NOTE-READY
+    note
+    wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: in
+    reply Captain, the lab task reported completion, but its ownership record is empty and its isolated copy is gone. I cannot verify a deliverable or forward the result to its parent. I acknowledged the notification without changing or deleting any work.
+    wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /
+    reply Captain, shipshape.
+    user Use the bash tool to run exactly this command and nothing el
+    reply LONGTURN-DONE
+    wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: in
+[19:12:43 fix2] pane tail:
+     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+     Acknowledging reported errors
+     Captain, the startup checks finished, but two Git operations reported "not a git repository." Project refresh is therefore not confirmed. No work is under way, and I made no project changes.
+     Reply with exactly NOTE-READY and nothing else. Do not run any tool.
+     NOTE-READY
+      Advisor 0 notes
+     ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+     Reading metadata layout
+     Acknowledging missing record blocker
+     Captain, the lab task reported completion, but its ownership record is empty and its isolated copy is gone. I cannot verify a deliverable or forward the result to its parent. I acknowledged the
+     notification without changing or deleting any work.
+     ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: $TMPDIR//fm-lab.Ul3xZ6/state/labtask.status
+     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+     Captain, shipshape.
+     Use the bash tool to run exactly this command and nothing else: sleep 40 ; echo LONGTURN-SLEPT . After it returns, reply with exactly LONGTURN-DONE and nothing else.
+     LONGTURN-DONE
+     ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+     After yield · 1
+       1. ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: $TMPDIR//fm-lab.Ul3xZ6/state/labtask.status ↵  ↵ Run bin/fm-wake-drain.sh first and handle th…
+       └ 󰘵 ↑ to edit
+      󱊷 Acknowledging handled task notification
+    ❯
+     ⠴ 1m · 󰪟 GPT-6-Astra ·  fm-lab.Ul3xZ6 ·  12.1%/272K 󰁨 · 󰙺 1.02                                                                                                       Reply With Exact LAB-READY Text
+fix2_exit=0

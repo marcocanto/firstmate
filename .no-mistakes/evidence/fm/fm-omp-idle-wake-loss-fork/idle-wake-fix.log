@@ -1,0 +1,44 @@
+[18:58:44 fix] home $TMPDIR//fm-lab.Uj8Lpw from 2350b8f6; omp omp/18.4.4; model openai-codex/gpt-6-astra
+[18:59:05 fix] watcher armed pid 45534
+[18:59:34 fix] precondition held: idle=true last=custom_message/advisor; idling 190s
+[19:02:45 fix] after idle: idle=true last=custom_message/advisor; wakes started so far: 1
+[19:02:47 fix] watcher closed on the wake; queue rows 3
+[19:02:47 fix] PASS idle wake started a turn 2s after the status line
+[19:03:14 fix] queue drained
+[19:03:14 fix] FINAL probe: idle=false last=custom/undefined; queue rows: 0
+[19:03:14 fix] probe log:
+    user Reply with exactly LAB-READY and nothing else. Do not run an
+    reply LAB-READY
+    wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: re
+    reply Captain, I handled the queued notification. The checks finished, but two Git commands reported that this folder is not a Git repository. No project work is running.
+    user Reply with exactly NOTE-READY and nothing else. Do not run a
+    reply NOTE-READY
+    note
+    wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: in
+[19:03:14 fix] pane tail:
+    │                          │ Recent sessions                                                       │
+    │                          │ No recent sessions                                                    │
+    │                          │                                                                       │
+    │                          │                                                                       │
+    │                          │                                                                       │
+    │                          │                                                                       │
+    ╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+     Tip: Try starting your prompt with a ->, and writing a list (1. Do X, 2. Do Y)
+     Reply with exactly LAB-READY and nothing else. Do not run any tool.
+     Determining override precedence
+     LAB-READY
+     ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: rearm-resurface
+     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+     Reporting errors, acknowledging them
+     Captain, I handled the queued notification. The checks finished, but two Git commands reported that this folder is not a Git repository. No project work is running.
+     Reply with exactly NOTE-READY and nothing else. Do not run any tool.
+     NOTE-READY
+      Advisor 0 notes
+     ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+     Reading operational metadata
+     Acknowledging inability to verify
+      󱊷 Acknowledging reconciled notification
+    ❯
+     ⠴ 28s · 󰪟 GPT-6-Astra ·  fm-lab.Uj8Lpw ·  11.7%/272K 󰁨 · 󰙺 0.72                                                                                                      Reply With Exact LAB-READY Text
+fix_exit=0
