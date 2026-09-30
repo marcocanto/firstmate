@@ -1,0 +1,82 @@
+# escape: wake queued behind busy turn, durable rows=3
+# --- pane (escape right after Escape (settle window, recovery not yet acted)) ---
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    Reply with exactly LAB-READY and nothing else. Do not run any tool.
+#    Checking response constraints
+#    LAB-READY
+#    watcher: started omp extension arm child 1; future ordinary re-arms are automatic; call fm_watch_arm_omp again only after a later notification says the cycle
+#    is missing, failed, or unhealthy
+#    Use the bash tool to run exactly this command and nothing else: sleep 60 ; echo LONGTURN-SLEPT . After it returns, reply with exactly LONGTURN-DONE and
+#    nothing else.
+#     F5 to Retry
+#   ❯ ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+#     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#     ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /var/folders/0k/3fxkts6n00d556lytm33m2jm0000gn/T//fm-lab.ijtNvR/escape/root/state/labtask.status
+#     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    󰵗 · 󰪟 GPT-6-Astra  ·  fm-lab.ijtNvR/escape/root ·  7.5%/272K 󰁨 · 󰙺 0.23 +  󰙺 0.05                                     Provide the exact LAB-READY response
+# escape precondition held: composer=pending, 3 durable rows
+# --- pane (escape after recovery) ---
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    Update Available
+#    New version 18.4.4 is available. Run: omp update
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    Reply with exactly LAB-READY and nothing else. Do not run any tool.
+#    Checking response constraints
+#    LAB-READY
+#    watcher: started omp extension arm child 1; future ordinary re-arms are automatic; call fm_watch_arm_omp again only after a later notification says the cycle
+#    is missing, failed, or unhealthy
+#    Use the bash tool to run exactly this command and nothing else: sleep 60 ; echo LONGTURN-SLEPT . After it returns, reply with exactly LONGTURN-DONE and
+#    nothing else.
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    Captain, the lab task reported completion, but its local copy is gone, so I could not verify the result. The parent report could not be delivered because its
+#    routing information is missing. The earlier sleep command was aborted.
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /var/folders/0k/3fxkts6n00d556lytm33m2jm0000gn/T//fm-lab.ijtNvR/escape/root/state/labtask.status
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    Captain, shipshape.
+#   ❯
+#    󰵗 · 󰪟 GPT-6-Astra  ·  fm-lab.ijtNvR/escape/root ·  8.5%/272K 󰁨 · 󰙺 0.46 +  󰙺 0.08                                     Provide the exact LAB-READY response
+# escape: wake-drain invocations in transcript: 2
+ok - live omp interrupt recovery (escape): omp omp/18.4.3 (openai-codex/gpt-6-astra) through tmux drained the wake with no further key, composer=empty
+# enter: wake queued behind busy turn, durable rows=3
+# --- pane (enter right after Enter (settle window, recovery not yet acted)) ---
+#    New version 18.4.4 is available. Run: omp update
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    LAB-READY
+#    watcher: started omp extension arm child 1; future ordinary re-arms are automatic; call fm_watch_arm_omp again only after a later notification says the cycle
+#    is missing, failed, or unhealthy
+#    Use the bash tool to run exactly this command and nothing else: sleep 60 ; echo LONGTURN-SLEPT . After it returns, reply with exactly LONGTURN-DONE and
+#    nothing else.
+#    After yield · 2
+#      1. ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome ↵  ↵ Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher contin…
+#      2. ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /var/folders/0k/3fxkts6n00d556lytm33m2jm0000gn/T//fm-lab.ijtNvR/enter/root/state/labtask.statu…
+#      └ 󰘵 ↑ to edit
+#     F5 to Retry
+#   ❯
+#    󰵗 · 󰪟 GPT-6-Astra  ·  fm-lab.ijtNvR/enter/root ·  7.5%/272K 󰁨 · 󰙺 0.23 +  󰙺 0.05                                         Reply Exactly With LAB-READY Only
+# enter precondition held: composer=empty, 3 durable rows
+# enter: continuation steer seen in transcript
+# --- pane (enter after recovery) ---
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    LAB-READY
+#    watcher: started omp extension arm child 1; future ordinary re-arms are automatic; call fm_watch_arm_omp again only after a later notification says the cycle
+#    is missing, failed, or unhealthy
+#    Use the bash tool to run exactly this command and nothing else: sleep 60 ; echo LONGTURN-SLEPT . After it returns, reply with exactly LONGTURN-DONE and
+#    nothing else.
+#    ⁣FIRSTMATE_OP: v1 watcher: Firstmate supervision continues in a new turn: an interrupted run left Firstmate watcher wakes queued, and they follow this message.
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    Running state reconciliation script
+#    Awaiting binding input
+#    Captain, the lab notification arrived, but I could not verify completion because its task record is empty and its local copy is missing. The sleep command was
+#    interrupted, so I cannot report LONGTURN-DONE.
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    Captain, shipshape.
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /var/folders/0k/3fxkts6n00d556lytm33m2jm0000gn/T//fm-lab.ijtNvR/enter/root/state/labtask.status
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#    Captain, shipshape.
+#   ❯
+#    󰵗 · 󰪟 GPT-6-Astra  ·  fm-lab.ijtNvR/enter/root ·  10.5%/272K 󰁨 · 󰙺 0.66 +  󰙺 0.10                                        Reply Exactly With LAB-READY Only
+# enter: wake-drain invocations in transcript: 3
+ok - live omp interrupt recovery (enter): omp omp/18.4.3 (openai-codex/gpt-6-astra) through tmux drained the wake with no further key, composer=empty
+rc=0

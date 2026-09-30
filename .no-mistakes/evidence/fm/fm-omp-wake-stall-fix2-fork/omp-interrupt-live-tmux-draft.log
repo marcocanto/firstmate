@@ -1,0 +1,53 @@
+# draft: wake queued behind busy turn, durable rows=3
+# draft: captain typed an unsent draft during the busy turn
+# --- pane (draft right after Escape (settle window, recovery not yet acted)) ---
+#    New version 18.4.4 is available. Run: omp update
+#   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+#    LAB-READY
+#    watcher: started omp extension arm child 1; future ordinary re-arms are automatic; call fm_watch_arm_omp again only after a later notification says the cycle
+#    is missing, failed, or unhealthy
+#    Use the bash tool to run exactly this command and nothing else: sleep 60 ; echo LONGTURN-SLEPT . After it returns, reply with exactly LONGTURN-DONE and
+#    nothing else.
+#     F5 to Retry
+#   ❯ ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+#     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#     ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /var/folders/0k/3fxkts6n00d556lytm33m2jm0000gn/T//fm-lab.lkkrR6/draft/root/state/labtask.status
+#     Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#     captain draft KEEP-ME-7 do not lose
+#    󰵗 · 󰪟 GPT-6-Astra  ·  fm-lab.lkkrR6/draft/root ·  7.5%/272K 󰁨 · 󰙺 0.23 +  󰙺 0.05                                         Respond with exact LAB-READY text
+# draft precondition held: composer=pending, 3 durable rows
+# draft: composer row after recovery: [❯]
+not ok - draft: captain draft not preserved exactly
+# pane:
+#   
+#   
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+#   
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#   
+#   
+#    Checking script header
+#   
+#    Acknowledging incomplete report
+#   
+#    Captain, the lab notification reports completion, but its empty task record prevents verification or delivery to its parent. I acknowledged the notification
+#    without changing project files. The sleep command was aborted, so I cannot report LONGTURN-DONE.
+#   
+#   
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /var/folders/0k/3fxkts6n00d556lytm33m2jm0000gn/T//fm-lab.lkkrR6/draft/root/state/labtask.status
+#   
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#   
+#   
+#    Captain, shipshape.
+#   
+#   ❯
+#   
+#   
+#   
+#     captain draft KEEP-ME-7 do not lose
+#    󰵗 · 󰪟 GPT-6-Astra  ·  fm-lab.lkkrR6/draft/root ·  10.5%/272K 󰁨 · 󰙺 0.57 +  󰙺 0.10                                        Respond with exact LAB-READY text
+#   
+#   
+# rows: 0
+rc=1
