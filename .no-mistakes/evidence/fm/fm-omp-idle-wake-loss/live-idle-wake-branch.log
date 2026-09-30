@@ -1,0 +1,70 @@
+# extension: worktree HEAD; omp omp/18.4.3 (openai-codex/gpt-6-astra) via tmux lab
+# idle precondition held: idle=true last=custom_message/advisor
+# idle wake started a turn 7s after its status line
+ok - idle wake: omp omp/18.4.3 (openai-codex/gpt-6-astra) via tmux lab started a turn for a wake after 190s idle behind an advisor note; durable queue drained
+ok - mid-run wake: omp omp/18.4.3 (openai-codex/gpt-6-astra) via tmux lab held a wake closing during a busy tool turn until the run's final reply, then delivered it; durable queue drained
+# final probe log:
+#   user Reply with exactly LAB-READY and nothing else. Do not run an
+#   reply LAB-READY
+#   user Reply with exactly NOTE-READY and nothing else. Do not run a
+#   reply NOTE-READY
+#   note
+#   wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: in
+#   reply Captain, the lab task reported completion, but I could not verify its result because its local record is empty and its isolated copy is missing. The completion report also could not reach its parent because the parent connection is missing or unreadable.
+#   wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /
+#   reply Captain, shipshape.
+#   user Use the bash tool to run exactly this command and nothing el
+#   reply LONGTURN-DONE
+#   wake ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: in
+# final pane:
+#   
+#    Reply with exactly NOTE-READY and nothing else. Do not run any tool.
+#   
+#   
+#    NOTE-READY
+#   
+#     Advisor 0 notes
+#   
+#   
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+#   
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#   
+#   
+#    Locating state script and skills layout
+#   
+#    Reporting unverified outcome
+#   
+#    Captain, the lab task reported completion, but I could not verify its result because its local record is empty and its isolated copy is missing. The
+#    completion report also could not reach its parent because the parent connection is missing or unreadable.
+#   
+#   
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /var/folders/0k/3fxkts6n00d556lytm33m2jm0000gn/T//fm-lab.7jFbRL/idle/root/state/labtask.status
+#   
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#   
+#   
+#    Captain, shipshape.
+#   
+#   
+#    Use the bash tool to run exactly this command and nothing else: sleep 40 ; echo LONGTURN-SLEPT . After it returns, reply with exactly LONGTURN-DONE and
+#    nothing else.
+#   
+#   
+#    LONGTURN-DONE
+#   
+#   
+#    ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: check: inactive-outcome
+#   
+#    Run bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.
+#   
+#   
+#    After yield · 1
+#      1. ⁣FIRSTMATE_OP: v1 watcher: FIRSTMATE WATCHER WAKE: signal: /var/folders/0k/3fxkts6n00d556lytm33m2jm0000gn/T//fm-lab.7jFbRL/idle/root/state/labtask.status…
+#      └ 󰘵 ↑ to edit
+#   
+#     󱊷 Acknowledging handled completion notification
+#   
+#   ❯
+#    ⠙ 1m · 󰪟 GPT-6-Astra ·  fm-lab.7jFbRL/idle/root ·  10.7%/272K 󰁨 · 󰙺 0.78                                                        Reply With Exactly LAB-READY
+rc=0

@@ -1,0 +1,61 @@
+# extension: b8721da3; omp omp/18.4.3 (openai-codex/gpt-6-astra) via tmux lab
+# idle precondition held: idle=true last=custom_message/advisor
+not ok - omp omp/18.4.3 (openai-codex/gpt-6-astra) via tmux lab: after 190s idle behind an advisor note, the wake started no turn within 60s (3 durable rows, idle=true last=custom_message/advisor); omp is holding an idle wake until someone types
+# pane:
+#   
+#   ╭─── omp v18.4.3 ──────────────────────────────────────────────────────────────────────────────────╮
+#   │                          │ Tips                                                                  │
+#   │      Welcome back!       │ # for prompt actions                                                  │
+#   │                          │ / for commands                                                        │
+#   │       ████████████       │ ! to run bash                                                         │
+#   │          ██  ██          │ $ to run python                                                       │
+#   │          ██  ██          │ ───────────────────────────────────────────────────────────────────── │
+#   │          ▒▒  ██          │ LSP Servers                                                           │
+#   │              ██          │ No LSP servers                                                        │
+#   │                          │                                                                       │
+#   │       GPT-6-Astra        │                                                                       │
+#   │       openai-codex       │                                                                       │
+#   │                          │ ───────────────────────────────────────────────────────────────────── │
+#   │                          │ Recent sessions                                                       │
+#   │                          │ No recent sessions                                                    │
+#   │                          │                                                                       │
+#   │                          │                                                                       │
+#   │                          │                                                                       │
+#   │                          │                                                                       │
+#   ╰──────────────────────────┴───────────────────────────────────────────────────────────────────────╯
+#    Tip: `/force read` pins the next turn to one specific tool when the model keeps reaching for the
+#         wrong one
+#   
+#   
+#    Reply with exactly LAB-READY and nothing else. Do not run any tool.
+#   
+#   
+#    LAB-READY
+#   
+#   
+#    Reply with exactly NOTE-READY and nothing else. Do not run any tool.
+#   
+#   
+#    NOTE-READY
+#   
+#     Advisor 0 notes
+#   
+#   ❯
+#    󰵗 · 󰪟 GPT-6-Astra ·  fm-lab.c2Vo7j/idle/root ·  7.5%/272K 󰁨 · 󰙺 0.23                                                         Reply With Exact LAB-READY Text
+#   
+#   
+#   
+#   
+#   
+#   
+#   
+#   
+#   
+#   
+# probe log:
+#   user Reply with exactly LAB-READY and nothing else. Do not run an
+#   reply LAB-READY
+#   user Reply with exactly NOTE-READY and nothing else. Do not run a
+#   reply NOTE-READY
+#   note
+rc=1
