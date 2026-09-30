@@ -2426,3 +2426,40 @@ ok - live omp idle delivery: omp omp/18.4.3 (openai-codex/gpt-6-astra) through H
 ```
 
 `tests/fm-omp-harness.test.sh` pins the same rule portably against a fake omp that holds an idle follow-up behind a non-assistant last message.
+
+### Remote second mate on fm-remote
+
+Measured 2026-09-30 from a parent on macOS arm64 against a remote macOS host reached through an SSH alias: macOS 26.6.2 arm64, Herdr 0.9.2, omp 18.4.4 installed by Homebrew with one provider logged in, and Claude Code 2.1.285.
+The branch ran from a separate remote code root with a separate remote home, driven from a separate parent home.
+Both Firstmate launch agents and the account's `fm-remote-entrypoint.sh` link pointed at that code root for the run, and the host's own `fm-remote-doctor.sh --fix` restored them to its Firstmate copy afterward.
+
+`omp` does not resolve on that account's plain SSH `PATH`, while the remote job worker's composed `PATH` includes the Homebrew bin directory, so the doctor's runtime check passed:
+
+```text
+$ bin/fm-on.sh <id> fm-remote-doctor.sh --harness omp
+check herdr-server=ok: session fm-remote is running in the Aqua login session (pid <pid>, launchd)
+check entrypoint-link=ok: <account-home>/.local/bin/fm-remote-entrypoint.sh
+check omp=ok: <homebrew-prefix>/bin/omp
+ok: remote second-mate readiness confirmed on this host
+```
+
+Every step below ran with `FM_HOME` set to the parent home.
+
+| Step | Command | Observed |
+| --- | --- | --- |
+| Seed | `bin/fm-remote-home-seed.sh <id> <alias> <remote-root> <remote-home> --no-projects` | `provisioned: <remote-home> projects=0` |
+| Launch on Claude | `bin/fm-spawn.sh <id> --secondmate --harness claude` | `spawned <id> harness=claude ... backend=herdr`, state `alive` |
+| Relaunch onto omp | `bin/fm-remote-secondmate-relaunch.sh <id> omp default default` | `relaunched <id> harness=omp from=claude model=default effort=default backend=herdr`, and the parent record read `harness=omp` |
+| Extensions | `ls <remote-home>/state/.omp-*-extension-loaded` | both markers named the new omp process, the agent called `fm_watch_arm_omp`, and `bin/fm-watch.sh` ran under the remote home |
+| Credentials | pane capture | omp finished its session-start turn on the logged-in provider with no sign-in prompt |
+| State | `bin/fm-crew-state.sh <id>` | `alive on <alias> (an idle secondmate is healthy)` |
+| Send | `bin/fm-send.sh fm-<id> '<ping>'` | the agent moved the inbox record to `handled/` and answered, and its correlated reply reached the parent status stream, which resolved that pending reply `via=status` |
+| Recovery keeps omp | kill the omp process with `config/secondmate-harness` set to `claude`, then one watcher-tick probe and relaunch | probe `state=dead`, then `spawned <id> harness=omp`; an earlier recovery from the same record also showed both extension markers rewritten by the recovered omp process |
+| Restart keeps omp | `bin/fm-secondmate-restart.sh <id>` with the same `claude` pin | `restarted: <id> on <alias> (omp)` |
+| Relaunch onto Claude | `bin/fm-remote-secondmate-relaunch.sh <id> claude default default` | `relaunched <id> harness=claude from=omp` |
+| Recovery keeps Claude | kill the Claude process with `config/secondmate-harness` set to `omp`, then the same tick | `spawned <id> harness=claude` |
+| Retire | `bin/fm-teardown.sh <id>` | `teardown <id> complete`, with 0 `fm-remote` workspaces and no process left under the remote home |
+
+The watcher tick ran `fm_secondmate_liveness_probe <meta> <id> poll` and then `fm_secondmate_liveness_relaunch <meta> <id> 900` from `bin/fm-secondmate-liveness-lib.sh`, the same pair `bin/fm-watch.sh` calls.
+Its first run after the omp relaunch refused with `error: invalid configured remote secondmate effort: default`, because the relaunch wrapper records the host's literal `default` for an absent pin.
+`bin/fm-spawn.sh` now reads that recorded word as no pin, and the watcher leg of `tests/fm-remote-secondmate-lifecycle-e2e.test.sh` recovers from that record.

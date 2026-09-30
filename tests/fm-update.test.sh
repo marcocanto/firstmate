@@ -19,7 +19,7 @@
 #     restart-secondmates carries EVERY live mate this pass left on origin's tip
 #     whose recorded runtime can prove a restart, INCLUDING one that was already
 #     there and one whose advance touched no instruction surface, because a
-#     restart is also what re-resolves launch-time harness wiring; a live mate
+#     restart is also what refreshes launch-time harness wiring; a live mate
 #     whose runtime cannot prove a restart falls to nudge-secondmates; and a mate
 #     whose home was skipped or whose endpoint is stopped gets no action at all.
 #   - Secondmate homes resolve from both state/<id>.meta and the

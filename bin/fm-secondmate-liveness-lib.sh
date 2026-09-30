@@ -31,7 +31,8 @@
 # re-resolves placement from the task's own metadata and registry route, so a
 # remote mate is relaunched on its recorded remote host through bin/fm-on.sh -
 # never as a local replacement - behind fm-spawn's own readiness gate and
-# per-task spawn lock.
+# per-task spawn lock, and on the harness, model, and effort its route record
+# names rather than on this home's current secondmate pin.
 #
 # Modes:
 #   full - session-start sweep: remote routes run the full readiness repair
@@ -141,7 +142,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   if [ -n "$remote_host" ]; then
     if [ "$mode" = full ]; then
       remote_rc=0
-      fm_remote_readiness_ensure "$FM_SM_LIVE_LIB_DIR" "$id" || remote_rc=$?
+      fm_remote_readiness_ensure "$FM_SM_LIVE_LIB_DIR" "$id" "$harness" || remote_rc=$?
       if [ "$remote_rc" -eq 255 ]; then
         FM_SM_LIVE_REASON="remote host unavailable or endpoint state unknown; route preserved on $remote_host"
         return 0

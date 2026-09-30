@@ -46,7 +46,7 @@ omp publishes no marker of its own; `FM_OMP_HARNESS=omp` is Firstmate's launch m
 `../../../bin/fm-spawn.sh` owns worker marker establishment, while the README launch command owns the signed-primary boundary.
 `../../../bin/fm-harness.sh crew` resolves `config/crew-harness`, where absent or `default` means firstmate's own harness.
 `../../../bin/fm-harness.sh secondmate` resolves `config/secondmate-harness` -> `config/crew-harness` -> firstmate's own harness.
-`../../../bin/fm-spawn.sh` re-resolves on every spawn, and an explicit per-spawn argument wins for that spawn.
+`../../../bin/fm-spawn.sh` re-resolves on every spawn, except that a remote secondmate route with a record keeps its recorded runtime, and an explicit per-spawn argument wins for that spawn.
 A new adapter's verified marker and command name must land in `../../../bin/fm-harness.sh`.
 
 ## Operation-to-reference matrix

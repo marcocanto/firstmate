@@ -773,6 +773,7 @@ When the harness token is absent or `default`, secondmate launch falls back thro
 
 `fm-harness.sh secondmate-model` and `fm-harness.sh secondmate-effort` expose only the optional tokens from `config/secondmate-harness`; `config/crew-harness` remains a bare adapter-name file.
 Changing this pin affects the next secondmate spawn or control-plane relaunch; the relaunch profile rules are owned by [`docs/agent-control.md`](agent-control.md#transactional-relaunch).
+A remote route that already has a record keeps its recorded runtime instead, as [`docs/remote-secondmates.md`](remote-secondmates.md#launch-or-recover) describes.
 
 ### Per-launch overrides and inherited defaults
 
