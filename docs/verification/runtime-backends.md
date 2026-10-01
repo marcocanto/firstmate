@@ -2341,6 +2341,34 @@ Before the status-row rule the shared classifier folded that row into the bare c
 After the rule, the same live Herdr capture read `empty`, a steer's doorbell landed, and the worker opened a turn on it.
 `tests/fm-composer-lib.test.sh` pins the unicode idle row, the nerd-preset idle row, the busy spinner row, and typed text over the same fixture in both locales.
 
+#### 2026-10-01 titled-rule composer (omp 18.4.5, Herdr 0.9.2)
+
+omp's `claude` value for `composer.shape` (a user-level omp setting; the worker overlay pins `borderless`) draws the composer between two rules, with the session title written into the right end of the opening rule:
+
+```text
+──────────────────────────────── Lab composer title ─
+❯
+────────────────────────────────────────────────────
+ <identity> · <model> · <path> · <branch> · 3.1%/1M
+```
+
+The opening rule is not a solid separator, so the solid closing rule read as a lone separator below the `❯` row and the cursorless Herdr read classified the idle pane `unknown`.
+`bin/fm-control.sh <id> exit` then refused to type `/quit`, and the away-mode injector's composer guard reads the same verdict.
+A live idle omp pane on Herdr showed this shape and read `unknown`; with the titled-rule pair the same capture reads `empty`.
+The live guard resumes a generated session file that holds only a title, so no prompt is submitted, and turns off omp's update check, whose banner draws solid rules higher in the viewport that otherwise pair with the closing rule and hide the defect:
+
+```sh
+tests/fm-omp-composer-titled-live-e2e.test.sh
+```
+
+```text
+ok - omp/18.4.5 on Herdr: an idle titled-rule omp composer reads empty and exit stops the agent
+ok - omp/18.4.5 on Herdr: typed text in a titled-rule omp composer reads pending, exit refuses, and the text stays
+```
+
+The same guard against the classifier without the titled-rule pair failed with `not ok - omp/18.4.5 on Herdr: an idle titled-rule omp composer must read empty, got 'unknown'`.
+`test_matrix_omp_claude_shape_titled_rule_pair` in `tests/fm-composer-lib.test.sh` pins the scrubbed live capture, typed and multi-line text, the same composer below a solid transcript rule (which never pairs across the titled rule, so the update banner's case is covered there), and the titled block without omp's status row below it, which stays `unknown`.
+
 ### Busy state and lifecycle
 
 | Fact | Observed |
