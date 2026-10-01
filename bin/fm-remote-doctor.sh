@@ -51,10 +51,12 @@
 #   check <check>=advisory: <non-blocking gap outside second-mate readiness>
 #   check <check>=human: <gap only a person at that machine can close>
 #   action: <check>: <the exact step to take>
+#   advice: <check>: <the optional step for an advisory check>
 # Every check line is authoritative for the moment it printed: under --fix it is
 # the state after the repair attempt, so a human gap is never presented as
 # fixed. Any remaining fixable or human gap, and any missing required tool,
-# exits non-zero. An advisory gap prints its action but never fails the run.
+# exits non-zero. An advisory gap prints its advice line but never fails the
+# run. A --replace-server attempt that does not complete also exits non-zero.
 #
 # --fix is idempotent and closes only automatable gaps: it writes and reloads
 # both Firstmate-owned Aqua agents, starts the Linux workers where no Aqua agent
@@ -1004,6 +1006,7 @@ fi
 printf 'platform=%s\n' "$PLATFORM"
 
 SERVER_REPLACED=0
+REPLACE_FAILED=0
 LAUNCH_AGENT_SHELL=
 if [ "$PLATFORM" = darwin ]; then
   LAUNCH_AGENT_SHELL=$(resolve_launch_agent_shell)
@@ -1015,7 +1018,7 @@ if [ "$MODE" = fix ]; then
   # state after repair rather than the intent of a repair.
   run_checks "$LAUNCH_AGENT_SHELL"
 elif [ "$MODE" = replace-server ]; then
-  replace_herdr_server || true
+  replace_herdr_server || REPLACE_FAILED=1
   run_checks "$LAUNCH_AGENT_SHELL"
 fi
 
@@ -1033,18 +1036,21 @@ for tool in "${OPTIONAL_TOOLS[@]}"; do
 done
 
 GAPS=()
-ACTIONABLE=()
+ADVISORIES=()
 i=0
 while [ "$i" -lt "${#CHECK_NAMES[@]}" ]; do
   printf 'check %s=%s\n' "${CHECK_NAMES[$i]}" "${CHECK_VALUES[$i]}"
   case "${CHECK_VALUES[$i]}" in
-    fixable:*|human:*) GAPS+=("$i"); ACTIONABLE+=("$i") ;;
-    advisory:*) ACTIONABLE+=("$i") ;;
+    fixable:*|human:*) GAPS+=("$i") ;;
+    advisory:*) ADVISORIES+=("$i") ;;
   esac
   i=$((i + 1))
 done
-for i in ${ACTIONABLE[@]+"${ACTIONABLE[@]}"}; do
+for i in ${GAPS[@]+"${GAPS[@]}"}; do
   [ -z "${CHECK_ACTIONS[$i]}" ] || printf 'action: %s: %s\n' "${CHECK_NAMES[$i]}" "${CHECK_ACTIONS[$i]}"
+done
+for i in ${ADVISORIES[@]+"${ADVISORIES[@]}"}; do
+  [ -z "${CHECK_ACTIONS[$i]}" ] || printf 'advice: %s: %s\n' "${CHECK_NAMES[$i]}" "${CHECK_ACTIONS[$i]}"
 done
 
 if [ "${#MISSING[@]}" -gt 0 ]; then
@@ -1058,6 +1064,10 @@ if [ "${#MISSING[@]}" -gt 0 ] || [ "${#GAPS[@]}" -gt 0 ]; then
     NAMES="${NAMES:+$NAMES }${CHECK_NAMES[$i]}"
   done
   printf 'error: this host is not ready for a remote second mate%s\n' "${NAMES:+; unresolved: $NAMES}" >&2
+  exit 1
+fi
+if [ "$REPLACE_FAILED" -eq 1 ]; then
+  printf 'error: --replace-server did not replace the herdr server for session %s; see the fix saved-machine line above\n' "$HERDR_SESSION_NAME" >&2
   exit 1
 fi
 printf 'ok: remote second-mate readiness confirmed on this host\n'

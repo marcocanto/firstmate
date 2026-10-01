@@ -231,7 +231,7 @@ Each gap carries one of two tags:
 
 Every gap is followed by an `action:` line naming the exact step.
 Any remaining gap exits non-zero.
-An `advisory:` line also carries an `action:` line, but it is outside second-mate readiness and never fails the run.
+An `advisory:` check is outside second-mate readiness and never fails the run; its optional step prints on an `advice:` line instead of an `action:` line.
 The script's own header owns the full line protocol.
 
 ### Repair with --fix

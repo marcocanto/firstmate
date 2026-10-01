@@ -269,6 +269,7 @@ case "${1:-} ${2:-}" in
     ;;
   "server stop")
     printf '%s\n' "$*" >> "$FM_FAKE_STATE/herdr.log"
+    [ ! -f "$FM_FAKE_STATE/stop-fail" ] || exit 1
     printf 'false\n' > "$FM_FAKE_HERDR_RUNNING"
     ;;
   "server "*|"server ")
@@ -639,8 +640,10 @@ for capabilities in '{"detached_server_daemon":false}' '{}' '{"detached_server_d
       "a routine $mode pass did not keep the Aqua server ready"
     assert_contains "$DOCTOR_OUT" 'check saved-machine=advisory: session fm-remote lacks detached_server_daemon=true' \
       "a routine $mode pass did not report the saved-machine advisory"
-    assert_contains "$DOCTOR_OUT" 'action: saved-machine: to save the host as a Herdr machine, rerun this command with --replace-server' \
+    assert_contains "$DOCTOR_OUT" 'advice: saved-machine: to save the host as a Herdr machine, rerun this command with --replace-server' \
       "a routine $mode pass did not name the deliberate replacement step"
+    assert_not_contains "$DOCTOR_OUT" 'action: saved-machine:' \
+      "a routine $mode pass presented the saved-machine advisory as a readiness action"
   done
   assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" bootout "a routine pass unloaded the launch agent for the saved-machine capability"
   assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" kickstart "a routine pass restarted the launch agent for the saved-machine capability"
@@ -691,6 +694,21 @@ assert_contains "$DOCTOR_OUT" 'fix saved-machine=failed:' "the refused replaceme
 assert_absent "$CASE_STATE/herdr.log" "the refused replacement stopped the server"
 printf '%s\n' "$AQUA_HOLDER_PID" > "$CASE_STATE/socket-owner"
 pass "--replace-server never acts on a host with second-mate readiness gaps"
+
+# A replacement that never stopped the server does not exit as success.
+printf '{"detached_server_daemon":false}\n' > "$CASE_STATE/capabilities"
+touch "$CASE_STATE/stop-fail"
+: > "$CASE_LAUNCHCTL_LOG"
+doctor --replace-server
+expect_code 1 "$DOCTOR_RC" "a --replace-server whose stop failed exited as success"
+assert_contains "$DOCTOR_OUT" 'fix saved-machine=failed: herdr server stop' "the failed stop was not reported"
+assert_contains "$DOCTOR_OUT" 'check saved-machine=advisory:' "the untouched server lost its advisory"
+assert_contains "$DOCTOR_OUT" 'error: --replace-server did not replace' "the failed replacement carried no error"
+assert_not_contains "$DOCTOR_OUT" 'ok: remote second-mate readiness confirmed' "the failed replacement claimed success"
+assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" kickstart "a failed stop still restarted the launch agent"
+rm -f "$CASE_STATE/stop-fail"
+printf '{"detached_server_daemon":true}\n' > "$CASE_STATE/capabilities"
+pass "--replace-server exits non-zero when the replacement does not happen"
 
 printf '%s\n' "$BACKGROUND_HOLDER_PID" > "$CASE_STATE/socket-owner"
 printf 'background job\n' > "$CASE_STATE/user-loaded-$LABEL"
