@@ -33,8 +33,8 @@ document:
 commands:
   lint: 'bin/fm-lint.sh'
 
-# Publish each run's test evidence to the orphan no-mistakes/evidence branch linked from the PR.
-# The evidence is not committed to the feature or default branch.
+# Test evidence stays on local disk and every run parks for an evidence review before Push and PR.
+# docs/configuration.md "Gate defaults" owns why; the validation-supervision skill owns the review.
 test:
   instructions: |
     Run live Herdr scenarios only through bin/fm-herdr-lab.sh with a named non-default fm-lab-* session, following that helper's prepare, provision, run, and teardown contract exactly.
@@ -45,5 +45,18 @@ test:
     Do not mutate the operator primary checkout, real fleet FM_HOME state, or production credentials (never sign in, sign out, re-login, or edit credential stores), and keep git changes otherwise inside the run worktree. A captain-opted-in live check may use the machine's normal Claude login; Claude's own session and transcript files under the home directory are expected and are not credential mutations. An empty isolated CLAUDE_CONFIG_DIR is not evidence that the normal login is unavailable.
     Read docs/herdr-backend.md and the bin/fm-herdr-lab.sh header as the owners of Herdr lab mechanics rather than reproducing that manual here.
     Ship or scout briefs that will drive Herdr lifecycle still require --herdr-lab at scaffold time; these Test-agent instructions are not a substitute for that brief flag.
+    The PR body publishes your testing_summary, scenarios, findings, artifact labels and captions, and the text of every evidence file you list. Keep all of them free of private project, repository, issue, PR, feature, and second mate names, home and worktree paths, hostnames, SSH aliases, IP addresses, and usernames; use generic stand-ins.
+  # Both settings are read from the pushed branch, so they hold for that branch's own run.
+  # store_in_repo would copy the evidence directory verbatim onto the public evidence branch.
+  # attach_media would upload images and videos to GitHub user-attachments at PR render time.
   evidence:
-    store_in_repo: true
+    store_in_repo: false
+    attach_media: false
+
+# A failing gate parks the run for a decision.
+# This command always fails, so every run stops after Test for an evidence review.
+# no-mistakes reads gates only from the default-branch copy of this file, so a pushed branch cannot remove it.
+gates:
+  - name: evidence-review
+    after: test
+    command: "echo 'Evidence review: the PR body publishes the Test step text and inlined text evidence. Check both for private details and clean them before approving. See the Gate defaults section of docs/configuration.md.'; exit 1"
