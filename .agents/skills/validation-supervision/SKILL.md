@@ -26,6 +26,13 @@ Send the same worker one exact decision naming the decision key, step, action, a
 Require the matching `resolved` event, forbid `--yes`, and require the worker to process every synchronous return until completion or a genuinely new escalation.
 Resume fleet supervision immediately after the decision lands.
 
+In the Firstmate repository every run parks at the `evidence-review` gate after Test as an ask-user finding, because the PR body publishes the Test step's text and inlined text evidence; [`docs/configuration.md`](../../../docs/configuration.md#gate-defaults-no-mistakesyaml) "Gate defaults" owns the policy and the list of private details.
+Run [`bin/fm-evidence-review.sh`](../../../bin/fm-evidence-review.sh) on the run named in the decision key, with one `--term` per private project, repository, and second mate name this home knows, and read all of its output, because exit 0 only means no home path, username, hostname, worktree path, or term matched.
+Never approve while the helper exits 2, because it has not proved which evidence directory the PR step will read.
+Edit or delete each evidence file under the printed directory that would publish a private detail, rerun the helper, and then decide the finding yourself by sending the worker an approve response for that gate.
+The Test step's recorded text cannot be edited in place, so when it carries a private detail, or when the branch turns `store_in_repo` or `attach_media` back on, escalate to the captain before answering, with the options of stopping the run and validating again or delivering the change as a plain PR.
+Never answer this gate with fix or skip: its command always fails, so a fix round cannot satisfy it, and a skip would publish unchecked evidence.
+
 Judge validation by the resolved state line from [`bin/fm-crew-state.sh`](../../../bin/fm-crew-state.sh), whose header owns outcome mappings and CI-monitor/daemon exceptions, never by shell liveness, the last status event, or a raw run record.
 Workers parked at approval or fix-review must follow the active gate help.
 A worker hand-editing, committing, aborting, or restarting during an active validation run duplicates pipeline ownership outside the supersession sequence above; steer it back to the gate response flow.

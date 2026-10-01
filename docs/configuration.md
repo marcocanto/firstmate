@@ -605,10 +605,22 @@ The flag is a home-local supervision-noise preference and is not inherited by se
 
 ## Gate defaults (.no-mistakes.yaml)
 
-The tracked `.no-mistakes.yaml` sets `test.evidence.store_in_repo: true` and pins `commands.lint` to `bin/fm-lint.sh`, the same owner CI invokes.
-Storing evidence in the repo publishes each run's test artifacts to the orphan `no-mistakes/evidence` branch and links them from the PR body, instead of keeping them on local disk under the no-mistakes home.
+The tracked `.no-mistakes.yaml` pins `commands.lint` to `bin/fm-lint.sh`, the same owner CI invokes, and keeps test evidence out of public view until someone has checked it.
+Every pull request to this repository and its upstream must carry no private project, repository, issue, PR, or feature names, no second mate names that reveal them, no home or worktree paths, no hostnames, SSH aliases, or IP addresses, and no usernames.
 
-That branch shares no history with code branches, so evidence never enters a pushed feature branch or the default branch; the worktree's `.no-mistakes/` stays local and CI rejects tracked entries under that path.
+No-mistakes can publish Test evidence three ways, and the config handles each one:
+
+- `test.evidence.store_in_repo: false` keeps the PR step from copying the run's evidence directory verbatim onto the orphan `no-mistakes/evidence` branch.
+- `test.evidence.attach_media: false` keeps the PR step from uploading images and videos to GitHub user-attachments.
+- The `evidence-review` gate runs after Test and always fails, so every run parks before Push and PR.
+  The PR body still renders the Test step's recorded text (summary, scenarios, findings, artifact labels and captions) and inlines the content of text evidence files, so that park is the point where the reviewer checks and cleans them.
+
+No-mistakes reads `store_in_repo` and `attach_media` from the pushed branch and reads `gates` and `test.instructions` only from the default-branch copy.
+A branch that turns either evidence setting back on reopens that route for its own run.
+A branch cannot remove or change the gate for its own run.
+No-mistakes itself redacts only the operator's home directory from the PR body.
+The [`validation-supervision` skill](../.agents/skills/validation-supervision/SKILL.md) owns how Firstmate answers the park, and [`fm-evidence-review.sh`](../bin/fm-evidence-review.sh) prints what the PR body will publish from a run's Test step.
+Evidence stays on local disk under the no-mistakes home; the worktree's `.no-mistakes/` stays local and CI rejects tracked entries under that path.
 The [`firstmate-coding-guidelines` skill](../.agents/skills/firstmate-coding-guidelines/SKILL.md#no-mistakes-test-configuration) owns why `commands.test` stays absent and targeted validation belongs to the evidence path.
 
 `commands.test` executes code, so no-mistakes honors it only from the default-branch copy of `.no-mistakes.yaml`; a pushed branch cannot change what the gate runs.
