@@ -781,6 +781,64 @@ assert_contains "$DOCTOR_OUT" 'check herdr-server=fixable: session fm-remote is 
   "an unprovable owner was not tagged fixable"
 pass "a session served outside the Aqua login session is fixable and --fix retakes it through launchd"
 
+# --- an upgrade that only moves the start target never restarts the server --
+
+PREVIOUS_START="$ROOT/bin/fm-remote-herdr-guard.sh"
+plist_exec_command() { # <plist>
+  python3 -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1], "rb"))["ProgramArguments"][3])' "$1"
+}
+upgraded_case() { # <running-capabilities>
+  new_case Darwin with-herdr gui
+  doctor --fix
+  expect_code 0 "$DOCTOR_RC" "the upgrade fixture could not be initialized"
+  python3 - "$CASE_PLIST" "$LAUNCHER" "$PREVIOUS_START" <<'PYEOF'
+import sys
+path, current, previous = sys.argv[1:]
+text = open(path).read()
+assert text.count(current) == 1
+open(path, "w").write(text.replace(current, previous))
+PYEOF
+  write_loaded_contract "$CASE_BIN/herdr" 'runatload | inferred program' \
+    "exec '$PREVIOUS_START' '$CASE_BIN/herdr' 'fm-remote'"
+  printf '%s\n' "$1" > "$CASE_STATE/capabilities"
+  : > "$CASE_LAUNCHCTL_LOG"
+  rm -f "$CASE_STATE/herdr.log"
+}
+
+upgraded_case '{"detached_server_daemon":false}'
+for mode in check --fix; do
+  if [ "$mode" = check ]; then doctor; else doctor --fix; fi
+  expect_code 0 "$DOCTOR_RC" "a routine $mode pass refused an upgraded host with only start-target drift"
+  assert_contains "$DOCTOR_OUT" 'check launchagent=advisory:' "a routine $mode pass did not advise the start-target drift on disk"
+  assert_contains "$DOCTOR_OUT" 'check launchagent-loaded=advisory:' "a routine $mode pass did not advise the loaded start-target drift"
+  assert_contains "$DOCTOR_OUT" 'advice: launchagent: rerun this command with --replace-server' "a routine $mode pass did not name the deliberate step"
+done
+assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" bootout "an automatic pass unloaded the upgraded agent"
+assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" kickstart "an automatic pass restarted the upgraded agent"
+assert_absent "$CASE_STATE/herdr.log" "an automatic pass stopped the upgraded server"
+assert_contains "$(plist_exec_command "$CASE_PLIST")" "$PREVIOUS_START" "an automatic pass rewrote the upgraded agent"
+pass "an automatic pass leaves an upgraded agent and its running Aqua server alone"
+
+doctor --replace-server
+expect_code 0 "$DOCTOR_RC" "--replace-server did not move the upgraded host to the current launcher"
+assert_contains "$DOCTOR_OUT" 'fix launchagent=applied:' "--replace-server did not rewrite the upgraded agent"
+assert_contains "$(plist_exec_command "$CASE_PLIST")" "$LAUNCHER" "--replace-server left the previous start target on disk"
+assert_grep 'server stop --session fm-remote' "$CASE_STATE/herdr.log" "--replace-server did not stop the upgraded server"
+assert_grep 'bootout' "$CASE_LAUNCHCTL_LOG" "--replace-server did not unload the upgraded agent"
+assert_grep "kickstart -k gui/$(id -u)/$LABEL" "$CASE_LAUNCHCTL_LOG" "--replace-server did not restart the upgraded agent"
+assert_contains "$DOCTOR_OUT" 'check launchagent=ok:' "the rewritten agent was not confirmed"
+assert_contains "$DOCTOR_OUT" 'check launchagent-loaded=ok:' "the reloaded agent was not confirmed"
+assert_contains "$DOCTOR_OUT" 'check saved-machine=ok:' "the replaced server was not savable"
+pass "--replace-server rewrites and reloads an upgraded agent"
+
+upgraded_case '{"detached_server_daemon":false}'
+printf 'false\n' > "$CASE_HERDR_RUNNING"
+doctor
+expect_code 1 "$DOCTOR_RC" "start-target drift with no running server was reported ready"
+assert_contains "$DOCTOR_OUT" 'check launchagent=fixable:' "start-target drift with no running server was not fixable"
+assert_contains "$DOCTOR_OUT" 'check launchagent-loaded=fixable:' "loaded start-target drift with no running server was not fixable"
+pass "start-target drift without a running Aqua server stays fixable"
+
 # --- no GUI login session: every dependent gap stays human -------------------
 
 new_case Darwin with-herdr no-gui

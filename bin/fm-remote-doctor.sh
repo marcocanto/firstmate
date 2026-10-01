@@ -65,12 +65,14 @@
 # installs packages, creates a login session, writes an auto-login password,
 # changes FileVault, stores an account password, or replaces a non-Firstmate
 # wrapper; those remain reported gaps. It never replaces a running Aqua-born
-# server for the saved-machine capability.
+# server for the saved-machine capability, and never rewrites or reloads an
+# agent whose only drift is the previous start target while that server runs.
 #
-# --replace-server is the deliberate operator step for that advisory on darwin:
-# it stops the Aqua-born fm-remote server that lacks detached_server_daemon=true
-# and restarts the launch agent, which closes every pane in the session, so the
-# second mates must be relaunched. It runs only when the host is otherwise ready
+# --replace-server is the deliberate operator step for those advisories on
+# darwin: it stops the Aqua-born fm-remote server that lacks
+# detached_server_daemon=true or runs under the previous start target, rewrites
+# such an agent, and restarts the launch agent. That closes every pane in the
+# session, so the second mates must be relaunched. It runs only when the host is otherwise ready
 # and makes one attempt; a capability still missing afterwards is a human gap.
 # Automatic readiness callers never pass it.
 set -eu
@@ -300,17 +302,22 @@ launch_agent_start_path() {
   printf '%s/bin/fm-remote-herdr-launch.sh' "$FM_ROOT"
 }
 
-launch_agent_exec_command() { # <resolved-herdr-path>
+# The start target an agent written before the same-PID launcher still runs.
+launch_agent_previous_start_path() {
+  printf '%s/bin/fm-remote-herdr-guard.sh' "$FM_ROOT"
+}
+
+launch_agent_exec_command() { # <resolved-herdr-path> [start-path]
   printf 'exec %s %s %s' \
-    "$(launch_agent_shell_quote "$(launch_agent_start_path)")" \
+    "$(launch_agent_shell_quote "${2:-$(launch_agent_start_path)}")" \
     "$(launch_agent_shell_quote "$1")" \
     "$(launch_agent_shell_quote "$HERDR_SESSION_NAME")"
 }
 
-render_launch_agent() { # <resolved-herdr-path> <resolved-login-shell>
+render_launch_agent() { # <resolved-herdr-path> <resolved-login-shell> [start-path]
   local herdr_bin=$1 shell=$2 exec_cmd shell_xml
   shell_xml=$(launch_agent_xml_escape "$shell")
-  exec_cmd=$(launch_agent_exec_command "$herdr_bin")
+  exec_cmd=$(launch_agent_exec_command "$herdr_bin" "${3:-}")
   cat <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -345,21 +352,21 @@ render_launch_agent() { # <resolved-herdr-path> <resolved-login-shell>
 XML
 }
 
-launch_agent_contract_matches() { # <resolved-login-shell>
-  local shell=$1 herdr_bin actual expected
+launch_agent_contract_matches() { # <resolved-login-shell> [start-path]
+  local shell=$1 start=${2:-} herdr_bin actual expected
   [ -f "$LAUNCH_AGENT_PLIST" ] && [ ! -L "$LAUNCH_AGENT_PLIST" ] || return 1
   herdr_bin=$(command -v herdr 2>/dev/null) || return 1
   actual=$(tr -d ' \t\r\n' < "$LAUNCH_AGENT_PLIST" 2>/dev/null) || return 1
-  expected=$(render_launch_agent "$herdr_bin" "$shell" | tr -d ' \t\r\n') || return 1
+  expected=$(render_launch_agent "$herdr_bin" "$shell" "$start" | tr -d ' \t\r\n') || return 1
   [ "$actual" = "$expected" ]
 }
 
-launch_agent_loaded_contract_matches() { # <resolved-login-shell>
-  local shell=$1 loaded herdr_bin exec_compact shell_compact plist_compact log_compact args
+launch_agent_loaded_contract_matches() { # <resolved-login-shell> [start-path]
+  local shell=$1 start=${2:-} loaded herdr_bin exec_compact shell_compact plist_compact log_compact args
   herdr_bin=$(command -v herdr 2>/dev/null) || return 1
   loaded=$(launchctl print "gui/$UID_NUM/$LAUNCH_AGENT_LABEL" 2>/dev/null) || return 1
   loaded=$(printf '%s' "$loaded" | tr -d ' \t\r\n') || return 1
-  exec_compact=$(launch_agent_exec_command "$herdr_bin" | tr -d ' \t\r\n') || return 1
+  exec_compact=$(launch_agent_exec_command "$herdr_bin" "$start" | tr -d ' \t\r\n') || return 1
   shell_compact=$(printf '%s' "$shell" | tr -d ' \t\r\n') || return 1
   plist_compact=$(printf '%s' "$LAUNCH_AGENT_PLIST" | tr -d ' \t\r\n') || return 1
   log_compact=$(printf '%s' "$LAUNCH_AGENT_LOG" | tr -d ' \t\r\n') || return 1
@@ -663,6 +670,18 @@ check_gui_session() {
     "log that account in once at the console, and enable automatic login in System Settings > Users & Groups if the machine runs headless; SSH cannot create a GUI session, and Firstmate never writes an auto-login password or changes FileVault"
 }
 
+# An upgrade changes only the start target. While an Aqua-born server owns the
+# session, that drift is advisory so no automatic pass reloads the agent and
+# closes its panes; --replace-server moves it to the current target.
+launch_agent_previous_start_kept() { # <resolved-login-shell> <contract-matcher>
+  "$2" "$1" "$(launch_agent_previous_start_path)" && herdr_server_aqua_owned
+}
+
+launch_agent_upgrade_advice() {
+  printf 'rerun this command with --replace-server to start %s; it closes every pane in session %s, so relaunch the second mates afterward' \
+    "$(launch_agent_start_path)" "$HERDR_SESSION_NAME"
+}
+
 check_launch_agent() { # <resolved-login-shell>
   local shell=$1
   if [ "$PLATFORM" != darwin ]; then
@@ -674,6 +693,9 @@ check_launch_agent() { # <resolved-login-shell>
   if [ -f "$LAUNCH_AGENT_PLIST" ] && [ ! -L "$LAUNCH_AGENT_PLIST" ]; then
     if launch_agent_contract_matches "$shell"; then
       record launchagent "ok: $LAUNCH_AGENT_PLIST matches the Firstmate-owned contract"
+    elif launch_agent_previous_start_kept "$shell" launch_agent_contract_matches; then
+      record launchagent "advisory: $LAUNCH_AGENT_PLIST still starts $(launch_agent_previous_start_path), and the Aqua-born server it started keeps running" \
+        "$(launch_agent_upgrade_advice)"
     else
       record launchagent "fixable: $LAUNCH_AGENT_PLIST does not match the current Firstmate-owned contract" \
         "rerun this command with --fix to rewrite its label, program arguments, session scope, restart policy, and log paths"
@@ -702,6 +724,9 @@ check_launch_agent_loaded() { # <resolved-login-shell>
   if launchctl print "gui/$UID_NUM/$LAUNCH_AGENT_LABEL" >/dev/null 2>&1; then
     if launch_agent_loaded_contract_matches "$shell"; then
       record launchagent-loaded "ok: gui/$UID_NUM/$LAUNCH_AGENT_LABEL matches the effective contract"
+    elif launch_agent_previous_start_kept "$shell" launch_agent_loaded_contract_matches; then
+      record launchagent-loaded "advisory: gui/$UID_NUM/$LAUNCH_AGENT_LABEL still starts $(launch_agent_previous_start_path), and the Aqua-born server it started keeps running" \
+        "$(launch_agent_upgrade_advice)"
     else
       record launchagent-loaded "fixable: gui/$UID_NUM/$LAUNCH_AGENT_LABEL does not match the effective Firstmate-owned contract" \
         "rerun this command with --fix to replace the loaded job with the current launch-agent contract"
@@ -896,19 +921,28 @@ start_herdr_server() {
 
 # One deliberate replacement of an Aqua-born server that lacks the detached
 # capability: stop it, wait for the socket to clear, then restart the agent.
-replace_herdr_server() {
-  local i=0
+replace_herdr_server() { # <resolved-login-shell>
+  local shell=$1 i=0 previous=0
+  case "$(check_value launchagent 2>/dev/null || true) $(check_value launchagent-loaded 2>/dev/null || true)" in
+    *advisory:*) previous=1 ;;
+  esac
   case "$(check_value saved-machine 2>/dev/null || true)" in
-    ok:*) return 0 ;;
+    ok:*) [ "$previous" -eq 1 ] || return 0 ;;
     advisory:*) ;;
     *)
       fix_report saved-machine failed "session $HERDR_SESSION_NAME is not ready for second mates on a darwin Aqua launch agent; close the gaps above with --fix first"
       return 1
       ;;
   esac
-  if ! check_is_ok launchagent-loaded; then
-    fix_report saved-machine failed "$LAUNCH_AGENT_LABEL does not match the loaded Firstmate-owned contract; close that gap with --fix first"
-    return 1
+  case "$(check_value launchagent 2>/dev/null || true) $(check_value launchagent-loaded 2>/dev/null || true)" in
+    ok:*\ ok:*|ok:*\ advisory:*|advisory:*\ ok:*|advisory:*\ advisory:*) ;;
+    *)
+      fix_report saved-machine failed "$LAUNCH_AGENT_LABEL does not match the loaded Firstmate-owned contract; close that gap with --fix first"
+      return 1
+      ;;
+  esac
+  if [ "$previous" -eq 1 ]; then
+    write_launch_agent "$shell" || return 1
   fi
   if ! fm_backend_herdr_cli "$HERDR_SESSION_NAME" server stop >/dev/null 2>&1; then
     fix_report saved-machine failed "herdr server stop for session $HERDR_SESSION_NAME did not succeed"
@@ -1018,7 +1052,7 @@ if [ "$MODE" = fix ]; then
   # state after repair rather than the intent of a repair.
   run_checks "$LAUNCH_AGENT_SHELL"
 elif [ "$MODE" = replace-server ]; then
-  replace_herdr_server || REPLACE_FAILED=1
+  replace_herdr_server "$LAUNCH_AGENT_SHELL" || REPLACE_FAILED=1
   run_checks "$LAUNCH_AGENT_SHELL"
 fi
 

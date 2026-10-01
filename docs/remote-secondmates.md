@@ -289,6 +289,11 @@ It does not give a standalone saved-machine session an automatic restart guarant
 The host can be saved only when the doctor reports `check saved-machine=ok:`.
 An Aqua-born server started before the same-PID launcher, or by the remote-job worker, reports `check saved-machine=advisory:` instead.
 No automatic readiness pass replaces that server: launch, relaunch, home seeding, and liveness probes never reload the launch agent or stop the server for this reason.
+
+An upgrade from a Firstmate version whose agent started the guard directly leaves that agent on the previous start target.
+While an Aqua-born server owns the session, the doctor reports that start-target-only drift as `check launchagent=advisory:` and `check launchagent-loaded=advisory:`.
+Automatic passes leave that agent and its running server alone, so the upgrade closes no panes.
+Any other launch-agent drift, or the same drift with no Aqua-born server running, stays `fixable:` and `--fix` rewrites and reloads the agent as before.
 Replacing it is a deliberate operator step:
 
 ```sh
@@ -296,7 +301,7 @@ bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh --replace-server
 ```
 
 It runs only when the host is otherwise ready for second mates.
-It stops the `fm-remote` server and restarts the launch agent, which closes every pane in that session.
+It rewrites an agent still on the previous start target, stops the `fm-remote` server, and restarts the launch agent, which closes every pane in that session.
 Relaunch the host's second mates afterward.
 It makes one attempt.
 If the capability is still missing, it reports `check saved-machine=human:` and does not retry; check the host's Herdr version and the launch agent log before trying again.
