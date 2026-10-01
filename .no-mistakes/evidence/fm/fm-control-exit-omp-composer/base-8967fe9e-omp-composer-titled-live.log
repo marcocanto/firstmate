@@ -1,0 +1,3 @@
+verdict=unknown
+fm-control exit rc=1 out: error: task omptitled's composer state is 'unknown', not proven empty; refusing to type the /quit exit command because it could concatenate onto existing text. Clear the composer, then retry 'exit'
+not ok - omp/18.4.5 on Herdr: an idle titled-rule omp composer must read empty, got 'unknown'
