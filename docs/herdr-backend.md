@@ -51,7 +51,7 @@ Select Herdr in any of these ways:
 - An explicit request to Firstmate.
 
 A remote second-mate agent is the one case with no choice: it always runs on Herdr, and [`remote-secondmates.md`](remote-secondmates.md) owns that requirement and the readiness its host must meet.
-On macOS, that host needs an Aqua-born detached server under launchd; [remote-secondmate setup](remote-secondmates.md#how-the-herdr-launch-agent-starts-its-server) owns its start mode and [saved-machine setup](remote-secondmates.md#add-the-host-to-the-herdr-sidebar) owns the sidebar step.
+On macOS, that host needs an Aqua-born server under launchd, and a saved Herdr machine also needs that server to be a detached daemon; [remote-secondmate setup](remote-secondmates.md#how-the-herdr-launch-agent-starts-its-server) owns its start mode and [saved-machine setup](remote-secondmates.md#add-the-host-to-the-herdr-sidebar) owns the sidebar step.
 
 Herdr is also auto-detected when the primary runs natively under `HERDR_ENV=1` and is not inside tmux.
 A tmux pane nested inside Herdr resolves to tmux because the innermost multiplexer wins.

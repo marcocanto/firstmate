@@ -651,6 +651,19 @@ for capabilities in '{"detached_server_daemon":false}' '{}' '{"detached_server_d
 done
 pass "routine readiness passes keep a non-detached Aqua server and only advise the saved-machine gap"
 
+# With a real readiness gap beside the advisory, the advisory never supplies an
+# action line, so a consumer naming the first gap names the real one.
+printf '{"detached_server_daemon":false}\n' > "$CASE_STATE/capabilities"
+mv "$CASE_BIN/treehouse" "$CASE_DIR/treehouse.hidden"
+doctor
+expect_code 1 "$DOCTOR_RC" "a missing required tool beside the advisory was reported ready"
+assert_contains "$DOCTOR_OUT" 'required treehouse=MISSING' "the missing tool was not reported"
+assert_contains "$DOCTOR_OUT" 'advice: saved-machine:' "the advisory step was dropped beside a real gap"
+assert_not_contains "$DOCTOR_OUT" 'action: saved-machine:' "the advisory was presented as the readiness action"
+mv "$CASE_DIR/treehouse.hidden" "$CASE_BIN/treehouse"
+printf '{"detached_server_daemon":true}\n' > "$CASE_STATE/capabilities"
+pass "an advisory beside a real readiness gap stays advice"
+
 # The deliberate replacement stops the server once and restarts the agent.
 printf '{"detached_server_daemon":false}\n' > "$CASE_STATE/capabilities"
 : > "$CASE_LAUNCHCTL_LOG"
