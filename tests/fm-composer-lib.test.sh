@@ -495,7 +495,7 @@ test_matrix_omp_claude_shape_titled_rule_pair() {
   # shapes, and trailing carriage returns kept). Before the titled rule could
   # open a pair, the solid closing rule read as a lone separator below the `❯`
   # row, so the idle pane classified `unknown` and fm-control refused `exit`.
-  local rc bg r dim titled closing status idle typed multiline orphan omp_done
+  local rc bg r dim titled closing status idle typed multiline orphan ruled omp_done
   rc="${ESC}[38;2;253;168;147m"; bg="${ESC}[48;2;15;16;25m"; r="${ESC}[0m"
   dim="${ESC}[38;5;238m"
   omp_done=$(printf 'omp\tdone')
@@ -519,6 +519,13 @@ test_matrix_omp_claude_shape_titled_rule_pair() {
   assert_screen "idle omp claude shape on herdr" empty "$CAPS_STYLED" "$idle" '' "$omp_done"
   assert_screen "idle omp claude shape without identity" empty "$CAPS_STYLED_NOID" "$idle"
   assert_screen "idle omp claude shape on a plain capture" empty "$CAPS_PLAIN" "$idle"
+  # A solid rule higher in the transcript (omp's update banner, a markdown
+  # `---`) must not pair across the titled rule with the closing rule.
+  ruled="${closing}"$'\n'"transcript line"$'\r\n'"$closing"$'\nmore transcript\r\n\r\n'"$titled"$'\n❯                                                         \r\n'"$closing"$'\n'"$status"
+  assert_screen "idle omp claude shape below a solid transcript rule" empty "$CAPS_STYLED" "$ruled" '' "$omp_done"
+  assert_screen "idle omp claude shape below a solid rule without identity" empty "$CAPS_STYLED_NOID" "$ruled"
+  ruled="${closing}"$'\n'"transcript line"$'\r\n'"$closing"$'\nmore transcript\r\n\r\n'"$titled"$'\n❯ typed draft text\r\n'"$closing"$'\n'"$status"
+  assert_screen "typed omp claude shape below a solid transcript rule" pending "$CAPS_STYLED" "$ruled" '' "$omp_done"
   # The protection this must NOT remove: text in that composer, one row or
   # wrapped, still refuses.
   typed="transcript line"$'\r\n\r\n'"$titled"$'\n❯ typed draft text\r\n'"$closing"$'\n'"$status"
@@ -532,6 +539,8 @@ test_matrix_omp_claude_shape_titled_rule_pair() {
   assert_screen "titled block above transcript text" unknown "$CAPS_STYLED" "$orphan" '' "$omp_done"
   orphan="transcript line"$'\r\n\r\n'"$titled"$'\n❯                                                         \r\n'"$closing"
   assert_screen "titled block at the screen bottom" unknown "$CAPS_STYLED" "$orphan" '' "$omp_done"
+  orphan="transcript line"$'\r\n'"$closing"$'\nmore transcript\r\n\r\n'"$titled"$'\n❯                                                         \r\n'"$closing"$'\nlater transcript text'
+  assert_screen "titled block below a solid transcript rule" unknown "$CAPS_STYLED" "$orphan" '' "$omp_done"
   pass "matrix: omp's titled-rule composer reads empty only above omp's status row; text still refuses"
 }
 

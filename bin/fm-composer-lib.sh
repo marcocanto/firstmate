@@ -83,13 +83,13 @@
 #                the RIGHT end of the opening rule (`──── <title> ─`, then
 #                `❯`, then a solid `─` rule, then the status row; verified
 #                through Herdr 0.9.2 on omp 18.4.3 and 18.4.5). A titled rule
-#                (_fm_composer_titled_rule_row) opens a pair only when no
-#                solid rule already has one open, never closes one, and the
-#                pair it opens counts only when omp's status row
-#                (FM_COMPOSER_OMP_STATUS_RE_DEFAULT) sits directly below the
-#                closing rule; otherwise that closing rule stays a lone
-#                separator and the verdict stays `unknown`, so a titled block
-#                in a transcript proves nothing. Without this shape the
+#                (_fm_composer_titled_rule_row) replaces any open candidate
+#                (a solid transcript rule above never pairs across it), never
+#                closes one, and the pair it opens counts only when omp's
+#                status row (FM_COMPOSER_OMP_STATUS_RE_DEFAULT) sits directly
+#                below the closing rule; otherwise that closing rule stays a
+#                lone separator and the verdict stays `unknown`, so a titled
+#                block in a transcript proves nothing. Without this shape the
 #                closing rule read as a lone separator below the `❯` row and
 #                an idle omp pane classified `unknown`.
 #
@@ -903,10 +903,10 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap]
       pi_lines=0
       pi_glyph_row=-1
       pi_glyph=''
-    elif [ "$pi_open" -lt 0 ] && _fm_composer_titled_rule_row "$trimmed"; then
-      # A titled rule opens a candidate only where no solid rule already has
-      # one open (a solid opener above already pairs with the closing rule);
-      # it closes nothing and is never a lone separator of its own.
+    elif _fm_composer_titled_rule_row "$trimmed"; then
+      # A titled rule replaces any open candidate, so a solid transcript rule
+      # above never pairs across it; it closes nothing and is never a lone
+      # separator of its own.
       pi_open=$row
       pi_open_titled=1
       pi_lines=0
