@@ -77,6 +77,21 @@
 #                different, self-proving thing: real claude 2.x draws exactly
 #                that (`─` rule, `❯`+NBSP, `─` rule), so the glyph inside the
 #                pair carries the shape and no identity is needed.
+#                omp's `claude` composer shape (a user-level omp setting,
+#                drawn whenever a launch lacks the worker overlay's borderless
+#                pin) is the same pair with the session title written into
+#                the RIGHT end of the opening rule (`──── <title> ─`, then
+#                `❯`, then a solid `─` rule, then the status row; verified
+#                through Herdr 0.9.2 on omp 18.4.3 and 18.4.5). A titled rule
+#                (_fm_composer_titled_rule_row) opens a pair only when no
+#                solid rule already has one open, never closes one, and the
+#                pair it opens counts only when omp's status row
+#                (FM_COMPOSER_OMP_STATUS_RE_DEFAULT) sits directly below the
+#                closing rule; otherwise that closing rule stays a lone
+#                separator and the verdict stays `unknown`, so a titled block
+#                in a transcript proves nothing. Without this shape the
+#                closing rule read as a lone separator below the `❯` row and
+#                an idle omp pane classified `unknown`.
 #
 # THE COMPOSER FOOTER ZONE (task firstmate-doorbell-vals-pending-p1): a
 # harness draws its own furniture BELOW the composer - a user statusLine, a
@@ -762,6 +777,20 @@ _fm_composer_pi_separator_row() {  # <trimmed-row>
   return 1
 }
 
+# _fm_composer_titled_rule_row: an opening rule with a title written into its
+# right end - at least 8 leading `─`, a non-rule title, and a closing `─`
+# (omp's `claude` composer shape; see THE SHAPE CATALOGUE). Never a solid
+# separator, so a solid rule never matches here. The width floor is the same
+# literal substring test _fm_composer_pi_separator_row uses.
+_fm_composer_titled_rule_row() {  # <trimmed-row>
+  local row=$1
+  [ -n "${row//─/}" ] || return 1
+  case "$row" in
+    '────────'*'─') return 0 ;;
+  esac
+  return 1
+}
+
 # Row-scan results are returned through FM_COMPOSER_SCAN_* globals (bash 3.2
 # has no nameref); they are internal to this owner.
 _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap]
@@ -798,7 +827,7 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap]
   FM_COMPOSER_SCAN_PI_GLYPH=
   FM_COMPOSER_SCAN_LEFTBAR_GLYPH_ROW=-1
   FM_COMPOSER_SCAN_LEFTBAR_GLYPH=
-  local leftbar_start=-1 pi_open=-1 pi_lines=0 pi_max
+  local leftbar_start=-1 pi_open=-1 pi_open_titled=0 pi_lines=0 pi_max next_row
   local probe row_glyph row_glyph_row
   local box_glyph_row=-1 box_glyph='' pi_glyph_row=-1 pi_glyph=''
   pi_max=$FM_COMPOSER_PI_MAX_LINES
@@ -846,6 +875,15 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap]
     # earlier transcript rule can never outrank the live bottom composer pair.
     if _fm_composer_pi_separator_row "$trimmed"; then
       FM_COMPOSER_SCAN_PI_LAST_SEPARATOR=$row
+      # A pair opened by a titled rule is omp's `claude` composer only when
+      # omp's own status row sits directly below this closing rule; anything
+      # else leaves this rule an unmatched separator, exactly as before the
+      # titled shape was known, so a titled transcript block proves nothing.
+      if [ "$pi_open_titled" = 1 ]; then
+        next_row=$(_fm_composer_screen_row "$((row + 1))" "$pane")
+        fm_composer_normalize_trim_var next_row
+        _fm_composer_row_is_omp_status "$next_row" || pi_open=-1
+      fi
       if [ "$pi_open" -ge 0 ]; then
         FM_COMPOSER_SCAN_PI_PAIR_FOUND=1
         FM_COMPOSER_SCAN_PI_OPEN=$pi_open
@@ -859,6 +897,16 @@ _fm_composer_scan_screen() {  # <plain-screen> <cursor-or-empty> [extract-wrap]
         FM_COMPOSER_SCAN_PI_GLYPH=$pi_glyph
       fi
       pi_open=$row
+      pi_open_titled=0
+      pi_lines=0
+      pi_glyph_row=-1
+      pi_glyph=''
+    elif [ "$pi_open" -lt 0 ] && _fm_composer_titled_rule_row "$trimmed"; then
+      # A titled rule opens a candidate only where no solid rule already has
+      # one open (a solid opener above already pairs with the closing rule);
+      # it closes nothing and is never a lone separator of its own.
+      pi_open=$row
+      pi_open_titled=1
       pi_lines=0
       pi_glyph_row=-1
       pi_glyph=''

@@ -486,6 +486,50 @@ test_matrix_omp_status_row_bounds_bare_composer() {
   pass "matrix: omp's status row bounds the bare composer's wrap region"
 }
 
+test_matrix_omp_claude_shape_titled_rule_pair() {
+  # omp's `claude` composer shape, drawn when a launch lacks the worker
+  # overlay's borderless pin: the session title sits in the right end of the
+  # opening rule, then the `❯` row, a solid closing rule, and omp's status row.
+  # Scrubbed from a live Herdr 0.9.2 `pane read --source visible --format ansi`
+  # of an idle omp second mate (title, model, and path replaced; styling, row
+  # shapes, and trailing carriage returns kept). Before the titled rule could
+  # open a pair, the solid closing rule read as a lone separator below the `❯`
+  # row, so the idle pane classified `unknown` and fm-control refused `exit`.
+  local rc bg r dim titled closing status idle typed multiline orphan omp_done
+  rc="${ESC}[38;2;253;168;147m"; bg="${ESC}[48;2;15;16;25m"; r="${ESC}[0m"
+  dim="${ESC}[38;5;238m"
+  omp_done=$(printf 'omp\tdone')
+  titled="${r}${rc}────────────────────────────────────────${r}${bg} ${r}${rc}${bg}Lab session title${r}${bg} ${r}${rc}─${r}"$'\r'
+  closing="${r}${rc}──────────────────────────────────────────────────────────${r}"$'\r'
+  status=" ${r}${ESC}[38;2;81;89;125m󰵗${r} ${r}${dim}·${r} ${r}${rc}󰪟 Model-X${r} ${r}${dim}·${r} ${r}${ESC}[38;2;125;207;255m repo/worktree${r} ${r}${dim}·${r}  ${r}${ESC}[38;2;224;175;104m51.3%/272K${r} "
+  idle="transcript line"$'\r\n\r\n'"$titled"$'\n❯                                                         \r\n'"$closing"$'\n'"$status"
+  # Non-vacuousness: the opening rule is not a solid separator, and the row
+  # below the closing rule is omp's status furniture.
+  _fm_composer_pi_separator_row "────────────────────────────────────────  Lab session title ─" \
+    && fail "fixture drift: a titled rule must not be a solid separator, or the shape is untested"
+  _fm_composer_row_is_omp_status "$(printf '%s\n' "$status" | fm_composer_strip_ansi)" \
+    || fail "fixture drift: the row below the closing rule must be omp's status row"
+  [ "$(fm_composer_classify_screen "$CAPS_STYLED" "$idle")" = need-identity ] \
+    || fail "an identity-capable profile should request the lazy identity probe for the omp pair"
+  assert_screen "idle omp claude shape on herdr" empty "$CAPS_STYLED" "$idle" '' "$omp_done"
+  assert_screen "idle omp claude shape without identity" empty "$CAPS_STYLED_NOID" "$idle"
+  assert_screen "idle omp claude shape on a plain capture" empty "$CAPS_PLAIN" "$idle"
+  # The protection this must NOT remove: text in that composer, one row or
+  # wrapped, still refuses.
+  typed="transcript line"$'\r\n\r\n'"$titled"$'\n❯ typed draft text\r\n'"$closing"$'\n'"$status"
+  assert_screen "typed omp claude shape" pending "$CAPS_STYLED" "$typed" '' "$omp_done"
+  multiline="transcript line"$'\r\n\r\n'"$titled"$'\n❯ first typed line\r\nsecond typed line\r\n'"$closing"$'\n'"$status"
+  assert_screen "multi-line omp claude shape" pending "$CAPS_STYLED" "$multiline" '' "$omp_done"
+  # A titled block is a composer only above omp's status row. The same block
+  # followed by anything else, or by nothing, stays the old lone-separator
+  # refusal, so a titled block in a transcript proves nothing.
+  orphan="transcript line"$'\r\n\r\n'"$titled"$'\n❯                                                         \r\n'"$closing"$'\nlater transcript text'
+  assert_screen "titled block above transcript text" unknown "$CAPS_STYLED" "$orphan" '' "$omp_done"
+  orphan="transcript line"$'\r\n\r\n'"$titled"$'\n❯                                                         \r\n'"$closing"
+  assert_screen "titled block at the screen bottom" unknown "$CAPS_STYLED" "$orphan" '' "$omp_done"
+  pass "matrix: omp's titled-rule composer reads empty only above omp's status row; text still refuses"
+}
+
 # codex_cell <grey> <glyph>: one codex 0.154 starfield cell exactly as the
 # harness draws it - a truecolor grey foreground, the composer's grey
 # background, the braille glyph, then a reset.
@@ -977,6 +1021,7 @@ test_matrix_muse_truecolor_glyph_survives_signal_loss
 test_matrix_cursor_reverse_video_placeholder_remnant
 test_matrix_herdr_halfblock_rule_bounds_bare_wrap
 test_matrix_omp_status_row_bounds_bare_composer
+test_matrix_omp_claude_shape_titled_rule_pair
 test_matrix_codex_idle_starfield_furniture
 test_matrix_pi_separated_needs_identity
 test_matrix_pi_dollar_status_footer_is_empty
