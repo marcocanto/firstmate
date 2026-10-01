@@ -1421,22 +1421,22 @@ const settle = () => new Promise((r) => setTimeout(r, 300));
 const mod = await import(pathToFileURL(process.env.EXT).href);
 mod.default(pi);
 await handlers.get("session_start")({ type: "session_start" }, ctx);
-// Main is busy with a captain task when wake 1 closes: it joins omp's queue.
+// Main is busy with a captain task when wake 1 closes: it joins the omp queue.
 fire(1);
 await waitFor("wake 1 never reached omp", () => wake(1).length === 1);
 if (wake(1)[0].o?.deliverAs !== "followUp") throw new Error("a wake that closes mid-run must be a follow-up");
-// Wake 2 closes while wake 1 still waits in omp's queue.
+// Wake 2 closes while wake 1 still waits in the omp queue.
 fire(2);
 await waitFor("the successor of wake 2 never started", () => arms() >= 3);
 await settle();
-if (sent.length !== 1) throw new Error(`a wake that closed behind an unread wake joined omp's queue: ${JSON.stringify(sent.slice(1))}`);
+if (sent.length !== 1) throw new Error(`a wake that closed behind an unread wake joined the omp queue: ${JSON.stringify(sent.slice(1))}`);
 // The run takes wake 1; its drain presents and acknowledges rows 1 and 2.
 await userStart(wake(1)[0].m);
 ackThrough(2);
 await endRun();
 await settle();
 if (sent.length !== 1) throw new Error(`a held wake whose row was acknowledged was delivered: ${JSON.stringify(sent.slice(1))}`);
-// Main handles nothing from the watcher now, so wake 3 joins omp's queue.
+// Main handles nothing from the watcher now, so wake 3 joins the omp queue.
 fire(3);
 await waitFor("wake 3 never reached omp", () => wake(3).length === 1);
 // Wake 4 closes while main handles wake 3; its row lands after that drain
@@ -1445,7 +1445,7 @@ await userStart(wake(3)[0].m);
 fire(4);
 await waitFor("the successor of wake 4 never started", () => arms() >= 5);
 await settle();
-if (wake(4).length !== 0) throw new Error("a wake that closed during the handling run joined omp's queue");
+if (wake(4).length !== 0) throw new Error("a wake that closed during the handling run joined the omp queue");
 ackThrough(3);
 await endRun();
 await waitFor("a held wake whose row is still queued was never delivered", () => wake(4).length === 1);
