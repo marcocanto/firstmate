@@ -487,11 +487,11 @@ test_matrix_omp_status_row_bounds_bare_composer() {
 }
 
 test_matrix_omp_claude_shape_titled_rule_pair() {
-  # omp's `claude` composer shape, drawn when a launch lacks the worker
-  # overlay's borderless pin: the session title sits in the right end of the
-  # opening rule, then the `❯` row, a solid closing rule, and omp's status row.
+  # omp's `claude` composer shape (a user-level omp setting): the session
+  # title sits in the right end of the opening rule, then the `❯` row, a
+  # solid closing rule, and omp's status row.
   # Scrubbed from a live Herdr 0.9.2 `pane read --source visible --format ansi`
-  # of an idle omp second mate (title, model, and path replaced; styling, row
+  # of an idle omp pane (title, model, and path replaced; styling, row
   # shapes, and trailing carriage returns kept). Before the titled rule could
   # open a pair, the solid closing rule read as a lone separator below the `❯`
   # row, so the idle pane classified `unknown` and fm-control refused `exit`.
@@ -509,6 +509,11 @@ test_matrix_omp_claude_shape_titled_rule_pair() {
     && fail "fixture drift: a titled rule must not be a solid separator, or the shape is untested"
   _fm_composer_row_is_omp_status "$(printf '%s\n' "$status" | fm_composer_strip_ansi)" \
     || fail "fixture drift: the row below the closing rule must be omp's status row"
+  # A rule broken only by padding carries no title and opens nothing.
+  _fm_composer_titled_rule_row "────────   ─" \
+    && fail "a rule broken only by spaces must not count as a titled rule"
+  _fm_composer_titled_rule_row "──────── Lab session title ─" \
+    || fail "a rule carrying a title must count as a titled rule"
   [ "$(fm_composer_classify_screen "$CAPS_STYLED" "$idle")" = need-identity ] \
     || fail "an identity-capable profile should request the lazy identity probe for the omp pair"
   assert_screen "idle omp claude shape on herdr" empty "$CAPS_STYLED" "$idle" '' "$omp_done"

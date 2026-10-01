@@ -77,9 +77,9 @@
 #                different, self-proving thing: real claude 2.x draws exactly
 #                that (`─` rule, `❯`+NBSP, `─` rule), so the glyph inside the
 #                pair carries the shape and no identity is needed.
-#                omp's `claude` composer shape (a user-level omp setting,
-#                drawn whenever a launch lacks the worker overlay's borderless
-#                pin) is the same pair with the session title written into
+#                omp's `claude` composer shape (a user-level omp setting; the
+#                worker overlay pins `borderless` instead) is the same pair
+#                with the session title written into
 #                the RIGHT end of the opening rule (`──── <title> ─`, then
 #                `❯`, then a solid `─` rule, then the status row; verified
 #                through Herdr 0.9.2 on omp 18.4.3 and 18.4.5). A titled rule
@@ -783,8 +783,10 @@ _fm_composer_pi_separator_row() {  # <trimmed-row>
 # separator, so a solid rule never matches here. The width floor is the same
 # literal substring test _fm_composer_pi_separator_row uses.
 _fm_composer_titled_rule_row() {  # <trimmed-row>
-  local row=$1
-  [ -n "${row//─/}" ] || return 1
+  local row=$1 title
+  title=${row//─/}
+  fm_composer_normalize_trim_var title
+  [ -n "$title" ] || return 1
   case "$row" in
     '────────'*'─') return 0 ;;
   esac

@@ -2341,25 +2341,33 @@ Before the status-row rule the shared classifier folded that row into the bare c
 After the rule, the same live Herdr capture read `empty`, a steer's doorbell landed, and the worker opened a turn on it.
 `tests/fm-composer-lib.test.sh` pins the unicode idle row, the nerd-preset idle row, the busy spinner row, and typed text over the same fixture in both locales.
 
-#### 2026-10-01 titled-rule composer (Herdr 0.9.2)
+#### 2026-10-01 titled-rule composer (omp 18.4.5, Herdr 0.9.2)
 
-An omp launched without the tracked worker overlay uses the `composer.shape` from the user's own omp config, and the `claude` value draws the composer between two rules with the session title written into the right end of the opening rule:
+omp's `claude` value for `composer.shape` (a user-level omp setting; the worker overlay pins `borderless`) draws the composer between two rules, with the session title written into the right end of the opening rule:
 
 ```text
-──────────────────────────────── Reply With Only the Word Ok ─
+──────────────────────────────── Lab composer title ─
 ❯
-──────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────
  <identity> · <model> · <path> · <branch> · 3.1%/1M
 ```
 
 The opening rule is not a solid separator, so the solid closing rule read as a lone separator below the `❯` row and the cursorless Herdr read classified the idle pane `unknown`.
 `bin/fm-control.sh <id> exit` then refused to type `/quit`, and the away-mode injector's composer guard reads the same verdict.
-A live idle omp second mate on Herdr showed this shape and read `unknown`; with the titled-rule pair the same capture reads `empty`.
-omp 18.4.3 and 18.4.5 both drew the shape in the lab.
-The lab reproduction ran omp 18.4.3 on a resumed titled session under a config holding only `startup.checkUpdate: false`, because omp's update banner draws solid rules higher in the viewport that otherwise pair with the closing rule and hide the defect.
-Against that pane the unpatched `bin/fm-control.sh <id> exit` refused with `composer state is 'unknown'`, and the patched one reported `stopped`.
-With `typed draft text` in the same composer, `exit` refused with `composer visibly holds pending text` and the text stayed in the composer.
-`test_matrix_omp_claude_shape_titled_rule_pair` in `tests/fm-composer-lib.test.sh` pins the scrubbed capture, typed and multi-line text, and the titled block without omp's status row below it, which stays `unknown`.
+A live idle omp pane on Herdr showed this shape and read `unknown`; with the titled-rule pair the same capture reads `empty`.
+The live guard resumes a generated session file that holds only a title, so no prompt is submitted, and turns off omp's update check, whose banner draws solid rules higher in the viewport that otherwise pair with the closing rule and hide the defect:
+
+```sh
+tests/fm-omp-composer-titled-live-e2e.test.sh
+```
+
+```text
+ok - omp/18.4.5 on Herdr: an idle titled-rule omp composer reads empty and exit stops the agent
+ok - omp/18.4.5 on Herdr: typed text in a titled-rule omp composer reads pending, exit refuses, and the text stays
+```
+
+The same guard against the classifier without the titled-rule pair failed with `not ok - omp/18.4.5 on Herdr: an idle titled-rule omp composer must read empty, got 'unknown'`.
+`test_matrix_omp_claude_shape_titled_rule_pair` in `tests/fm-composer-lib.test.sh` pins the scrubbed live capture, typed and multi-line text, and the titled block without omp's status row below it, which stays `unknown`.
 
 ### Busy state and lifecycle
 
