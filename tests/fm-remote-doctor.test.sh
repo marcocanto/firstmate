@@ -1152,7 +1152,7 @@ assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a darwin probe result that swapp
 probe_case Darwin 0 "${LINUX_FACTS[@]:1}" 'required perl=/usr/bin/perl' 'required g*=/usr/bin/git'
 assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a darwin probe result with a glob-shaped name was accepted"
 
-probe_case Darwin 0 "${LINUX_FACTS[@]}" 'required perl=/usr/bin/perl' 'required perl=/usr/bin/perl'
+probe_case Darwin 0 "${LINUX_FACTS[@]:1}" 'required perl=/usr/bin/perl' 'required perl=/usr/bin/perl'
 assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a darwin probe result with a duplicate name was accepted"
 
 probe_case Darwin 0 "${LINUX_FACTS[@]}" 'required perl=/usr/bin/perl' 'not a probe fact'
