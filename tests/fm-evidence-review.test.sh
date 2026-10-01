@@ -29,18 +29,18 @@ conn.commit()
 PY
 }
 
-make_run clean "Drove the fixture and it passed." "Output of $HOME/.no-mistakes/evidence/clean/out.log"
+make_run clean "Drove the fixture and it passed." "Output of the fixture run"
 mkdir -p "$NMH/evidence/clean"
-printf 'ran from %s/work\n' "$HOME" > "$NMH/evidence/clean/out.log"
+printf 'fixture output line\n' > "$NMH/evidence/clean/out.log"
 printf '\000\001' > "$NMH/evidence/clean/shot.png"
 
 out=$("$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" clean)
 rc=$?
-expect_code 0 "$rc" "home paths alone are redacted, so no marker is flagged"
+expect_code 0 "$rc" "a run with no hit exits 0"
 assert_contains "$out" "Drove the fixture and it passed." "step result text is printed"
 assert_contains "$out" "--- test round 1" "round records are printed"
 assert_contains "$out" "--- out.log (text," "text evidence file is listed"
-assert_contains "$out" "ran from $HOME/work" "text evidence content is printed"
+assert_contains "$out" "fixture output line" "text evidence content is printed"
 assert_contains "$out" "--- shot.png (not UTF-8 text, 2 bytes)" "binary evidence is listed by size"
 pass "clean run prints records and files and exits 0"
 
@@ -53,6 +53,29 @@ assert_contains "$out" "term 'private-widget': test step result line" "term mark
 assert_contains "$out" "(none)" "a run with no evidence directory reports no files"
 pass "markers in Test text exit 1"
 
+make_run homepath "Read notes at $HOME/notes/plan.txt." "plain caption"
+out=$("$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" homepath)
+rc=$?
+expect_code 1 "$rc" "a home path is flagged even after redaction"
+assert_contains "$out" "home path: test step result line" "home path hit names its record"
+assert_not_contains "$out" "username '" "the redacted home path does not also count as a username"
+pass "home paths exit 1 without a username hit"
+
+make_run worktree "Ran from $HOME/.treehouse/pool/2/repo." "Copied into $NMH/worktrees/abc/worktree/out.log"
+mkdir -p "$NMH/evidence/worktree"
+printf 'cwd %s/.no-mistakes/worktrees/abc/run\n' "$HOME" > "$NMH/evidence/worktree/cwd.log"
+printf 'secret\n' > "$TMP_ROOT/outside.txt"
+ln -s "$TMP_ROOT/outside.txt" "$NMH/evidence/worktree/link.txt"
+out=$("$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" worktree)
+rc=$?
+expect_code 1 "$rc" "worktree paths and symlinks are flagged"
+assert_contains "$out" "worktree path '.treehouse/': test step result line" "a redacted treehouse path is a hit"
+assert_contains "$out" "worktree path '.no-mistakes/worktrees/': cwd.log line 1" "a redacted no-mistakes worktree path is a hit"
+assert_contains "$out" "/nm/worktrees/': test round 1 line" "the configured no-mistakes worktrees path is a hit"
+assert_contains "$out" "refused entry: link.txt" "a symlinked evidence entry is a hit"
+assert_not_contains "$out" "secret" "a symlinked evidence entry is never read"
+pass "worktree paths and symlinked entries exit 1"
+
 err=$("$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" missing 2>&1 >/dev/null)
 rc=$?
 expect_code 2 "$rc" "unknown run is refused"
@@ -62,4 +85,18 @@ err=$("$ROOT/bin/fm-evidence-review.sh" --nm-home "$TMP_ROOT/absent" clean 2>&1 
 rc=$?
 expect_code 2 "$rc" "absent state database is refused"
 assert_contains "$err" "state database not found" "refusal names the missing database"
+
+err=$("$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" ../clean 2>&1 >/dev/null)
+rc=$?
+expect_code 2 "$rc" "a run id with a path separator is refused"
+assert_contains "$err" "one path segment" "refusal names the run id rule"
+
+printf 'test:\n  evidence:\n    local_root: /srv/evidence\n' > "$NMH/config.yaml"
+err=$("$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" clean 2>&1 >/dev/null)
+rc=$?
+expect_code 2 "$rc" "a moved evidence root without --evidence-root is refused"
+assert_contains "$err" "pass --evidence-root" "refusal asks for the evidence root"
+"$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" --evidence-root "$NMH/evidence" clean >/dev/null
+expect_code 0 "$?" "an explicit evidence root is accepted"
+rm -f "$NMH/config.yaml"
 pass "unreviewable runs exit 2"

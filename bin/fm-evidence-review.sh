@@ -10,31 +10,40 @@
 # files into the public PR body. docs/configuration.md "Gate defaults" owns that
 # policy; the validation-supervision skill owns the review procedure.
 #
-# The helper is read-only. It prints three sections:
+# The helper is read-only and prints a conservative complete review rather than
+# an exact rendered preview. It prints three sections:
 #   1. Every Test record no-mistakes can render for the run: the step result's
-#      findings and each round's findings, as JSON.
+#      findings and each round's findings, as JSON. The Testing section uses the
+#      final payload; the Pipeline section renders each round's findings.
 #   2. Every file under <evidence-root>/<run-id>, with the full content of
-#      UTF-8 text files and a size line for anything else.
-#   3. Identity markers: lines in sections 1 and 2 that still contain the
-#      operator's username, a hostname, or a --term value after the home
-#      directory redaction no-mistakes applies to the PR body.
+#      UTF-8 text files and a size line for anything else. Symlinks and other
+#      non-regular entries are never followed or read.
+#   3. Hits: lines in sections 1 and 2 that still contain a home path (the
+#      "~" no-mistakes leaves after redacting the home directory), the
+#      operator's username, a hostname, a worktree path (a .treehouse/ path or
+#      a no-mistakes worktrees/ path), or a --term value after the home
+#      directory redaction no-mistakes applies to the PR body, plus each
+#      refused entry from section 2.
 #
 # Inputs:
 #   --nm-home        no-mistakes home; default $NM_HOME, else ~/.no-mistakes.
-#   --evidence-root  run evidence root; default <nm-home>/evidence. Pass it when
-#                    the global test.evidence.local_root moves evidence.
+#   --evidence-root  run evidence root; default <nm-home>/evidence. Required
+#                    when <nm-home>/config.yaml sets test.evidence.local_root,
+#                    because the default would then name the wrong directory.
 #   --term           extra private text to flag, repeatable (for example a
 #                    private project, repository, or second mate name).
+#   <run-id>         one path segment of letters, digits, '-' or '_'.
 #
 # The Test records come from <nm-home>/state.sqlite, opened read-only, using the
 # step_results and step_rounds tables of no-mistakes v1.79.0. A missing table,
 # column, or run stops with exit 2 rather than printing a partial review.
 #
 # Exit status:
-#   0  no identity marker found. This does not certify the evidence: private
-#      project, issue, PR, and feature names need a human read of sections 1-2.
-#   1  at least one identity marker found; section 3 lists each one.
-#   2  usage error, unreadable state database, or no Test step for the run.
+#   0  no hit found. This does not certify the evidence: private project,
+#      issue, PR, and feature names need a human read of sections 1-2.
+#   1  at least one hit found; section 3 lists each one.
+#   2  usage error, unproved evidence root, unreadable state database, a run
+#      evidence path that is a symlink, or no Test step for the run.
 set -eu
 
 exec python3 - "$@" <<'PY'
@@ -114,20 +123,46 @@ def pretty(raw: str) -> str:
         return raw
 
 
-def evidence_files(run_dir: Path) -> list[tuple[str, str | None, int]]:
+RUN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+LOCAL_ROOT_RE = re.compile(r"^\s*local_root\s*:")
+
+
+def configured_local_root(nm_home: Path) -> bool:
+    """Report whether the global config sets test.evidence.local_root."""
+    config = nm_home / "config.yaml"
+    if not config.is_file():
+        return False
+    return any(LOCAL_ROOT_RE.match(line) for line in config.read_text(encoding="utf-8", errors="replace").splitlines())
+
+
+def evidence_files(run_dir: Path) -> tuple[list[tuple[str, str | None, int]], list[str]]:
+    if run_dir.is_symlink():
+        raise ReviewError(f"run evidence path is a symlink: {run_dir}")
     if not run_dir.is_dir():
-        return []
+        return [], []
     files: list[tuple[str, str | None, int]] = []
-    for path in sorted(p for p in run_dir.rglob("*") if p.is_file()):
-        data = path.read_bytes()
-        text: str | None = None
-        if data and b"\x00" not in data:
-            try:
-                text = data.decode("utf-8")
-            except UnicodeDecodeError:
-                text = None
-        files.append((path.relative_to(run_dir).as_posix(), text, len(data)))
-    return files
+    refused: list[str] = []
+    for parent, dirs, names in os.walk(run_dir, followlinks=False):
+        base = Path(parent)
+        for name in list(dirs):
+            if (base / name).is_symlink():
+                refused.append((base / name).relative_to(run_dir).as_posix())
+                dirs.remove(name)
+        for name in names:
+            path = base / name
+            rel = path.relative_to(run_dir).as_posix()
+            if path.is_symlink() or not path.is_file():
+                refused.append(rel)
+                continue
+            data = path.read_bytes()
+            text: str | None = None
+            if data and b"\x00" not in data:
+                try:
+                    text = data.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = None
+            files.append((rel, text, len(data)))
+    return sorted(files), sorted(refused)
 
 
 # Mirrors the shape of no-mistakes' safepath.RedactText closely enough to keep
@@ -185,28 +220,56 @@ def identity_markers(extra_terms: list[str]) -> list[tuple[str, str]]:
     return usable
 
 
-def scan(label: str, text: str, homes: list[str], markers: list[tuple[str, str]]) -> list[str]:
+def worktree_markers(nm_home: Path, homes: list[str]) -> list[str]:
+    """Worktree path spellings that survive home redaction."""
+    markers = [".treehouse/", ".no-mistakes/worktrees/"]
+    configured = redact_home(str(nm_home / "worktrees"), homes) + "/"
+    if not any(m.lower() in configured.lower() for m in markers):
+        markers.append(configured)
+    return markers
+
+
+# The "~" that home redaction leaves behind, standing alone or starting a path.
+REDACTED_HOME_RE = re.compile(r"(?:^|(?<=[\s\"'`(=:]))~(?=/|[\s\"'`),;:]|$)")
+
+
+def scan(label: str, text: str, homes: list[str], markers: list[tuple[str, str]], worktrees: list[str]) -> list[str]:
     hits: list[str] = []
     for number, line in enumerate(redact_home(text, homes).splitlines(), start=1):
         lowered = line.lower()
+        if REDACTED_HOME_RE.search(line):
+            hits.append(f"home path: {label} line {number}")
         for kind, value in markers:
             if value.lower() in lowered:
                 hits.append(f"{kind} {value!r}: {label} line {number}")
+        for value in worktrees:
+            if value.lower() in lowered:
+                hits.append(f"worktree path {value!r}: {label} line {number}")
     return hits
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    nm_home = resolve_nm_home(args.nm_home)
-    evidence_root = Path(args.evidence_root).expanduser() if args.evidence_root else nm_home / "evidence"
     try:
+        if not RUN_ID_RE.match(args.run_id):
+            raise ReviewError(f"run id must be one path segment of letters, digits, '-' or '_': {args.run_id!r}")
+        nm_home = resolve_nm_home(args.nm_home)
+        if args.evidence_root:
+            evidence_root = Path(args.evidence_root).expanduser()
+        elif configured_local_root(nm_home):
+            raise ReviewError(f"{nm_home / 'config.yaml'} sets test.evidence.local_root; pass --evidence-root with that directory")
+        else:
+            evidence_root = nm_home / "evidence"
         records = test_records(nm_home / "state.sqlite", args.run_id)
+        run_dir = evidence_root / args.run_id
+        files, refused = evidence_files(run_dir)
     except ReviewError as exc:
         print(f"fm-evidence-review: {exc}", file=sys.stderr)
         return 2
 
     homes = home_candidates()
     markers = identity_markers(args.term)
+    worktrees = worktree_markers(nm_home, homes)
     hits: list[str] = []
 
     print(f"===== Test records for run {args.run_id}")
@@ -215,21 +278,22 @@ def main(argv: list[str]) -> int:
     for label, raw in records:
         body = pretty(raw)
         print(f"\n--- {label}\n{body}")
-        hits += scan(label, body, homes, markers)
+        hits += scan(label, body, homes, markers, worktrees)
 
-    run_dir = evidence_root / args.run_id
     print(f"\n===== Evidence files under {run_dir}")
-    files = evidence_files(run_dir)
-    if not files:
+    if not files and not refused:
         print("(none)")
     for rel, text, size in files:
         if text is None:
             print(f"\n--- {rel} (not UTF-8 text, {size} bytes)")
             continue
         print(f"\n--- {rel} (text, {size} bytes)\n{text}")
-        hits += scan(rel, text, homes, markers)
+        hits += scan(rel, text, homes, markers, worktrees)
+    for rel in refused:
+        print(f"\n--- {rel} (symlink or non-regular entry, not read)")
+        hits.append(f"refused entry: {rel}")
 
-    print("\n===== Identity markers")
+    print("\n===== Hits")
     if not hits:
         print("none found; read the sections above for private names before approving")
         return 0
