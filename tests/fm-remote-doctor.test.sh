@@ -1071,6 +1071,104 @@ fi
 DOCTOR_WORKER_PID=
 pass "doctor refreshes stale worker identity before probing tools"
 
+# --- the worker probe result is validated against this platform's tool set ---
+
+# A copied code root whose fm-remote-doctor.sh is a stub, so the real worker
+# returns a chosen probe result to the real doctor. The platform comes only
+# from the override, never from the runner's own kernel.
+probe_case() { # <doctor-platform> <stub-exit> <probe-line...>
+  local doctor_platform=$1 stub_exit=$2 tool
+  shift 2
+  new_case Linux with-herdr no-gui
+  rm -f "$CASE_BIN/sleep" "$CASE_BIN/uname"
+  mkdir -p "$CASE_HOME/.local/bin"
+  for tool in herdr tasks-axi treehouse claude; do
+    ln -s "$CASE_BIN/$tool" "$CASE_HOME/.local/bin/$tool"
+  done
+  PROBE_ROOT="$CASE_DIR/remote-root"
+  mkdir -p "$PROBE_ROOT/bin"
+  cp "$ROOT/bin/fm-remote-job-lib.sh" "$ROOT/bin/fm-remote-job-worker.sh" "$PROBE_ROOT/bin/"
+  printf '%s\n' "$@" > "$PROBE_ROOT/probe.out"
+  cat > "$PROBE_ROOT/bin/fm-remote-doctor.sh" <<SH
+#!/usr/bin/env bash
+cat '$PROBE_ROOT/probe.out'
+exit $stub_exit
+SH
+  chmod +x "$PROBE_ROOT/bin/fm-remote-doctor.sh"
+  # The worker runs only tracked bin/ commands from a code root with AGENTS.md.
+  printf 'probe fixture root\n' > "$PROBE_ROOT/AGENTS.md"
+  git -C "$PROBE_ROOT" init -q
+  git -C "$PROBE_ROOT" add AGENTS.md bin
+  HOME="$CASE_HOME" FM_ROOT_OVERRIDE="$PROBE_ROOT" FM_REMOTE_JOB_PLATFORM_OVERRIDE=Linux \
+    "$PROBE_ROOT/bin/fm-remote-job-worker.sh" > "$CASE_STATE/worker.out" 2> "$CASE_STATE/worker.err" &
+  DOCTOR_WORKER_PID=$!
+  for _ in $(seq 1 100); do
+    [ -f "$CASE_HOME/.firstmate/remote-job/worker.ready" ] && break
+    sleep 0.05
+  done
+  assert_present "$CASE_HOME/.firstmate/remote-job/worker.ready" "the probe fixture worker did not start"
+  CASE_REMOTE_JOB_ACTIVE=
+  CASE_PLATFORM_OVERRIDE=$doctor_platform
+  FM_ROOT_OVERRIDE="$PROBE_ROOT" doctor
+  stop_probe_worker
+}
+
+stop_probe_worker() {
+  kill -TERM "$DOCTOR_WORKER_PID" 2>/dev/null || true
+  for _ in $(seq 1 100); do
+    kill -0 "$DOCTOR_WORKER_PID" 2>/dev/null || break
+    sleep 0.05
+  done
+  if kill -0 "$DOCTOR_WORKER_PID" 2>/dev/null; then
+    kill -KILL "$DOCTOR_WORKER_PID" 2>/dev/null || true
+  fi
+  DOCTOR_WORKER_PID=
+}
+
+PROBE_OK='check remote-job-probe=ok: the remote job worker completed the required-tool probe'
+PROBE_INVALID='check remote-job-probe=fixable: the remote job worker returned an invalid required-tool probe result'
+LINUX_FACTS=(
+  'required git=/usr/bin/git'
+  'required jq=/usr/bin/jq'
+  'required herdr=/opt/tools/herdr'
+  'required tasks-axi=/opt/tools/tasks-axi'
+  'required treehouse=/opt/tools/treehouse'
+  'required harness=claude:/opt/tools/claude'
+)
+
+probe_case Darwin 0 "${LINUX_FACTS[@]}" 'required perl=/usr/bin/perl'
+assert_contains "$DOCTOR_OUT" "$PROBE_OK" "a darwin probe result carrying perl was rejected"$'\n'"$DOCTOR_OUT"
+assert_contains "$DOCTOR_OUT" 'required perl=/usr/bin/perl' "the accepted darwin probe result was not reported"
+
+probe_case Darwin 0 "${LINUX_FACTS[@]}"
+assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a darwin probe result without perl was accepted"
+
+probe_case Darwin 0 "${LINUX_FACTS[@]}" 'required perl=/usr/bin/perl' 'required unknown-tool=/opt/tools/unknown-tool'
+assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a darwin probe result with an unknown name was accepted"
+
+probe_case Darwin 0 "${LINUX_FACTS[@]:1}" 'required perl=/usr/bin/perl' 'required unknown-tool=/opt/tools/unknown-tool'
+assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a darwin probe result that swapped a known name for an unknown one was accepted"
+
+probe_case Darwin 0 "${LINUX_FACTS[@]:1}" 'required perl=/usr/bin/perl' 'required g*=/usr/bin/git'
+assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a darwin probe result with a glob-shaped name was accepted"
+
+probe_case Darwin 0 "${LINUX_FACTS[@]}" 'required perl=/usr/bin/perl' 'required perl=/usr/bin/perl'
+assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a darwin probe result with a duplicate name was accepted"
+
+probe_case Darwin 0 "${LINUX_FACTS[@]}" 'required perl=/usr/bin/perl' 'not a probe fact'
+assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a darwin probe result with a malformed line was accepted"
+
+probe_case Darwin 1 "${LINUX_FACTS[@]}" 'required perl=MISSING'
+assert_contains "$DOCTOR_OUT" "$PROBE_OK" "a darwin probe result reporting perl missing was not accepted as a valid result"
+assert_contains "$DOCTOR_OUT" 'required perl=MISSING' "a missing perl was not reported from the worker probe"
+
+probe_case Linux 0 "${LINUX_FACTS[@]}"
+assert_contains "$DOCTOR_OUT" "$PROBE_OK" "a six-fact linux probe result was rejected"
+
+probe_case Linux 0 "${LINUX_FACTS[@]}" 'required perl=/usr/bin/perl'
+assert_contains "$DOCTOR_OUT" "$PROBE_INVALID" "a linux probe result carrying perl was accepted"
+pass "the worker probe result is validated against this platform's required tools plus harness"
+
 # --- the entrypoint symlink is recreated when it is missing ------------------
 
 new_case Linux with-herdr no-gui
