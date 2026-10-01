@@ -2367,7 +2367,7 @@ ok - omp/18.4.5 on Herdr: typed text in a titled-rule omp composer reads pending
 ```
 
 The same guard against the classifier without the titled-rule pair failed with `not ok - omp/18.4.5 on Herdr: an idle titled-rule omp composer must read empty, got 'unknown'`.
-`test_matrix_omp_claude_shape_titled_rule_pair` in `tests/fm-composer-lib.test.sh` pins the scrubbed live capture, typed and multi-line text, and the titled block without omp's status row below it, which stays `unknown`.
+`test_matrix_omp_claude_shape_titled_rule_pair` in `tests/fm-composer-lib.test.sh` pins the scrubbed live capture, typed and multi-line text, the same composer below a solid transcript rule (which never pairs across the titled rule, so the update banner's case is covered there), and the titled block without omp's status row below it, which stays `unknown`.
 
 ### Busy state and lifecycle
 
