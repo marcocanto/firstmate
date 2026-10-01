@@ -71,7 +71,7 @@ The extension header owns how consumption is observed and why it only decides wh
 omp's replacement follows its own generation-owner contract in `.omp/extensions/fm-primary-omp-watch.ts`, whose header owns its differences from Pi:
 
 - It retires the predecessor arm at replacement shutdown instead of retaining it across the handoff.
-- It reports no shutdown reason, so every shutdown with a pending actionable close persists the handoff for the next owning `session_start` to replay.
+- It reports no shutdown reason, so every shutdown with a pending actionable close persists the handoff for the next owning `session_start`, which replays a queue-backed wake only while a wake-queue row it covers is still unacknowledged.
 
 ### Cursor stop hook
 

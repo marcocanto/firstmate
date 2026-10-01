@@ -11,9 +11,9 @@
 //     still tracked at before_agent_start / message_start exactly as on Pi.
 //   - omp reports no session_shutdown reason, so EVERY shutdown with a pending
 //     actionable close persists the replacement handoff and the next owning
-//     session_start, in this process or a later one, replays it. Replaying a
-//     wake main has already drained is harmless (the queue is durable and the
-//     drain is idempotent); losing one across /new is not.
+//     session_start, in this process or a later one, replays it through the
+//     queue gate below, so a wake whose rows a drain already acknowledged is
+//     dropped rather than replayed.
 //   - Replacement shutdown retires the established predecessor arm before the
 //     successor arms; unlike Pi, it is not retained until a distinct active
 //     successor generation commits its own arm, so omp keeps the plain
@@ -69,6 +69,23 @@
 // main consumes at the user message_start carrying the exact wake text;
 // either event finishes the pending record, and a still-unconsumed record
 // rides the replacement handoff.
+//
+// Queue-backed delivery (stated once here):
+// The watcher appends a wake's durable queue row before it prints the reason,
+// and one drain presents and acknowledges every queued row at once, so a
+// notification can outlive its row: a follow-up waiting in omp's queue behind
+// the run whose drain already consumed it, or a handoff replay after that
+// drain. A queue-backed close records the queue's sequence watermark when it
+// is created and goes out only while a row at or below that watermark is
+// still unacknowledged; otherwise it is finished without a send. While main
+// is handling a consumed wake, or still has an accepted wake whose rows are
+// queued, a new queue-backed close is held in this extension instead of
+// joining omp's queue; the next plain agent_end releases every held close
+// back through the gate, which drops those that run's drain acknowledged.
+// Messages with no row of their own (a supervision-host line, the watcher's
+// downtime re-announcement, and this extension's failure notices) are never
+// gated, and a continuity failure found for a dropped or held close is
+// surfaced on its own.
 //
 // Interrupted-run recovery (stated once here):
 // A follow-up waits in omp's queue until the run ends. omp reads not idle
@@ -148,6 +165,9 @@ type PendingActionableClose = {
   message: string;
   predecessorArmPid: string;
   delivered?: true;
+  // The wake-queue sequence the close covers, for a queue-backed wake only
+  // (header: "Queue-backed delivery").
+  queueSeq?: number;
 };
 
 type ReplacementActionableHandoff = {
@@ -186,6 +206,10 @@ type SessionGeneration = {
   steeredWakes: Set<string>;
   // Bumped on every plain agent_end so only the latest settle check acts.
   interruptCheck: number;
+  // Queue-backed wakes held until the run handling an earlier wake ends.
+  heldWakes: Set<string>;
+  // A wake was consumed in the run that has not reached a plain agent_end.
+  handlingWake: boolean;
 };
 
 const extensionFile = fileURLToPath(import.meta.url);
@@ -200,6 +224,8 @@ const hostScript = `${fmRoot}/bin/fm-supervision-host.sh`;
 const marker = `${state}/.omp-watch-extension-loaded`;
 const handoffDir = `${state}/extensions/omp-primary-watch`;
 const actionableHandoff = `${handoffDir}/session-replacement-actionable.json`;
+const wakeQueue = `${state}/.wake-queue`;
+const wakeQueueSeq = `${state}/.wake-queue.seq`;
 const extensionVersion = `sha256:${createHash("sha256").update(readFileSync(extensionFile)).digest("hex")}`;
 const retryBaseMs = positiveInteger("FM_WATCH_REARM_RETRY_BASE_MS", 250);
 const retryMaxMs = positiveInteger("FM_WATCH_REARM_RETRY_MAX_MS", 4000);
@@ -377,13 +403,54 @@ function nodeErrorCode(error: unknown): string {
     : "";
 }
 
+// The watcher appends a wake's queue row before it prints the reason line, so
+// every reason except the downtime re-announcement (bin/fm-watch.sh
+// resurface_after_downtime) has one; a supervision-host line is a wake of its
+// own with no row.
+function queueBackedWake(message: string): boolean {
+  if (/^supervision-host:/m.test(message)) return false;
+  const reason = actionableLine(message);
+  return reason !== "" && reason !== "check: rearm-resurface";
+}
+
+// The highest sequence the queue has handed out; an unreadable counter leaves
+// the wake ungated rather than guessing.
+function wakeQueueWatermark(): number | undefined {
+  let text: string;
+  try {
+    text = readFileSync(wakeQueueSeq, "utf8").trim();
+  } catch (error) {
+    return nodeErrorCode(error) === "ENOENT" ? 0 : undefined;
+  }
+  return /^[0-9]+$/.test(text) ? Number(text) : undefined;
+}
+
+// Whether any unacknowledged row at or below <watermark> is still queued. The
+// drain acknowledges by atomic replacement, so an unlocked read sees a whole
+// queue; a queue that exists but cannot be read is not proof of a drain.
+function wakeRowsQueued(watermark: number): boolean {
+  let queue: string;
+  try {
+    queue = readFileSync(wakeQueue, "utf8");
+  } catch (error) {
+    return nodeErrorCode(error) !== "ENOENT";
+  }
+  return queue.split("\n").some((row) => {
+    const fields = row.split("\t");
+    return fields.length >= 5 && /^[0-9]+$/.test(fields[1]) && Number(fields[1]) <= watermark;
+  });
+}
+
 function createPendingActionable(message: string, predecessorArmPid: string): PendingActionableClose {
-  return {
+  const pending: PendingActionableClose = {
     version: 1,
     token: `${process.pid}-${Date.now()}-${++replacementCoordinator.nextTokenId}`,
     message,
     predecessorArmPid,
   };
+  const queueSeq = queueBackedWake(message) ? wakeQueueWatermark() : undefined;
+  if (queueSeq !== undefined) pending.queueSeq = queueSeq;
+  return pending;
 }
 
 function validatePendingActionable(value: unknown): PendingActionableClose {
@@ -398,7 +465,12 @@ function validatePendingActionable(value: unknown): PendingActionableClose {
     typeof (value as { predecessorArmPid?: unknown }).predecessorArmPid !== "string" ||
     !/^[0-9]*$/.test((value as { predecessorArmPid: string }).predecessorArmPid) ||
     ((value as { delivered?: unknown }).delivered !== undefined &&
-      (value as { delivered?: unknown }).delivered !== true)
+      (value as { delivered?: unknown }).delivered !== true) ||
+    !(
+      (value as { queueSeq?: unknown }).queueSeq === undefined ||
+      (Number.isSafeInteger((value as { queueSeq?: unknown }).queueSeq) &&
+        (value as { queueSeq: number }).queueSeq >= 0)
+    )
   ) {
     throw new Error(`invalid omp replacement actionable handoff at ${actionableHandoff}`);
   }
@@ -546,6 +618,8 @@ function createGeneration(): SessionGeneration {
     deferredClose: null,
     steeredWakes: new Set(),
     interruptCheck: 0,
+    heldWakes: new Set(),
+    handlingWake: false,
   };
 }
 
@@ -654,6 +728,7 @@ export default function (pi: ExtensionAPI) {
       if (wake.content !== text) continue;
       owner.unconsumedWakes.delete(token);
       owner.steeredWakes.delete(token);
+      owner.handlingWake = true;
       wake.pending.delivered = true;
       try {
         finishPendingActionable(owner, wake.pending);
@@ -763,13 +838,34 @@ export default function (pi: ExtensionAPI) {
     return confirmHandlingDelivery(snapshot());
   }
 
+  // The queue-backed delivery gate stated in this file's header.
+  function queueDisposition(owner: SessionGeneration, pending: PendingActionableClose): "send" | "hold" | "drop" {
+    if (pending.queueSeq === undefined) return "send";
+    if (!wakeRowsQueued(pending.queueSeq)) return "drop";
+    if (owner.handlingWake) return "hold";
+    for (const wake of owner.unconsumedWakes.values()) {
+      const earlier = wake.pending.queueSeq;
+      if (wake.pending.token !== pending.token && earlier !== undefined && wakeRowsQueued(earlier)) return "hold";
+    }
+    return "send";
+  }
+
+  // Returns false only when the generation is no longer live; a held or
+  // dropped wake still surfaces any continuity failure found for it.
   async function deliverActionableWake(
     owner: SessionGeneration,
-    message: string,
     pending: PendingActionableClose,
+    failure: string,
     recovery?: { generation: string; watcherPid: string },
   ): Promise<boolean> {
     if (!generationIsLive(owner)) return false;
+    const disposition = queueDisposition(owner, pending);
+    if (disposition !== "send") {
+      if (disposition === "hold") owner.heldWakes.add(pending.token);
+      if (failure) surfaceFailure(owner, failure);
+      return true;
+    }
+    const message = failure ? `${pending.message}\n\n${failure}` : pending.message;
     if (recovery) {
       const confirmed = confirmHandlingDeliveryWithRetry(owner, recovery);
       if (!confirmed.ok) {
@@ -858,8 +954,9 @@ export default function (pi: ExtensionAPI) {
         }
         // A record omp has accepted but not consumed is neither redelivered
         // nor finished here: consumption finishes it, replacement replays it.
+        // A held record waits for the end of the handling run.
         const pending = owner.pendingActionables.find(
-          (item) => !item.delivered && !owner.unconsumedWakes.has(item.token),
+          (item) => !item.delivered && !owner.unconsumedWakes.has(item.token) && !owner.heldWakes.has(item.token),
         );
         if (!pending) break;
         const existingClaim = replacementCoordinator.deliveries.get(pending.token);
@@ -895,12 +992,14 @@ export default function (pi: ExtensionAPI) {
             releaseClaim();
             return;
           }
-          const message = restoration.failure ? `${pending.message}\n\n${restoration.failure}` : pending.message;
-          const delivered = await deliverActionableWake(owner, message, pending, restoration.recovery);
-          if (!delivered) {
+          const delivered = await deliverActionableWake(owner, pending, restoration.failure, restoration.recovery);
+          if (!delivered || owner.heldWakes.has(pending.token)) {
+            // A held record reached no one, so a replacement waiting on this
+            // claim must still deliver it.
             settleClaim("failed");
             releaseClaim();
-            return;
+            if (!delivered) return;
+            continue;
           }
           const awaitingConsumption = owner.unconsumedWakes.has(pending.token);
           if (awaitingConsumption && !generationIsLive(owner)) {
@@ -913,7 +1012,8 @@ export default function (pi: ExtensionAPI) {
           }
           settleClaim("delivered");
           if (!awaitingConsumption) {
-            // omp consumed it before this ran.
+            // omp consumed it before this ran, or its queue rows were
+            // already acknowledged so nothing was sent.
             pending.delivered = true;
             try {
               finishPendingActionable(owner, pending);
@@ -1232,6 +1332,13 @@ export default function (pi: ExtensionAPI) {
     latestContext = ctx ?? latestContext;
     if (event && typeof event === "object" && "willContinue" in event && event.willContinue === true) return;
     const owner = generation;
+    // The run that handled a wake has ended; held wakes meet the queue gate
+    // again, and only those whose rows are still queued go out.
+    owner.handlingWake = false;
+    if (owner.heldWakes.size > 0) {
+      owner.heldWakes.clear();
+      void processPendingActionables(owner);
+    }
     void recoverInterruptedRun(owner, ctx).catch((error) => {
       const detail = error instanceof Error ? error.message : String(error);
       surfaceFailure(owner, `watcher: FAILED - omp extension could not recover a wake an interrupted run left unsent\n${detail}`);
