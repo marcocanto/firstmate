@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Guard for the Firstmate-owned dev.firstmate.herdr.fm-remote launch agent.
-# Make the Aqua login session own a detached fm-remote Herdr server.
+# Make the Aqua login session own the fm-remote Herdr server.
 #
 # Usage:
 #   fm-remote-herdr-guard.sh <herdr-path> <session>
@@ -16,9 +16,8 @@
 # 0 tells launchd the job is done until something restarts it, non-zero asks
 # for a retry after the throttle interval):
 #   no server owns the session socket  -> exec `herdr server --session <s>`
-#   the owner was born in Aqua and reports detached_server_daemon:true
-#                                      -> exit 0, leave it alone
-#   the owner was born in Aqua but lacks that capability, or
+#   the owner was born in the Aqua session (launchd or the Aqua remote-job
+#   worker), detached or not           -> exit 0, leave it alone
 #   the owner was born anywhere else (an SSH remote attach, a shell over
 #   ssh/mosh, or a birth it cannot prove) -> `herdr server stop`, wait until the
 #                                          socket is released, then exec
@@ -28,7 +27,10 @@
 #                                          another foreign server
 #   the server does not release the socket in time -> exit 1
 # A takeover closes every pane in that session; the parent firstmate's
-# secondmate liveness sweep relaunches its mates into the detached Aqua server.
+# secondmate liveness sweep relaunches its mates into the Aqua-born server.
+# Replacing an Aqua-born server that lacks detached_server_daemon:true is the
+# operator's deliberate fm-remote-doctor.sh --replace-server step, never this
+# guard's.
 # bin/fm-remote-herdr-owner-lib.sh owns the owner discovery and the birth
 # markers; FM_REMOTE_HERDR_GUARD_STOP_WAIT_TENTHS (default 50) bounds the
 # release wait in tenths of a second. Every decision prints one line to
@@ -61,10 +63,6 @@ status_running() { # <status-json>
   [ "$(printf '%s' "$1" | jq -r '.server.running // false' 2>/dev/null)" = true ]
 }
 
-status_detached() { # <status-json>
-  printf '%s' "$1" | jq -e '.server.capabilities.detached_server_daemon == true' >/dev/null 2>&1
-}
-
 start_server() {
   log "starting the herdr server for session $SESSION inside this launch agent (pid $$)"
   exec "$HERDR_BIN" server --session "$SESSION"
@@ -89,14 +87,11 @@ else
 fi
 
 if fm_remote_herdr_birth_is_aqua "$BIRTH"; then
-  if status_detached "$STATUS"; then
-    log "session $SESSION is served by pid $OWNER born in the Aqua login session ($BIRTH) with detached_server_daemon=true; nothing to do"
-    exit 0
-  fi
-  log "session $SESSION is served by pid $OWNER born in the Aqua login session ($BIRTH) without detached_server_daemon=true; saved machines require a detached server, taking the session over"
-else
-  log "session $SESSION is served by ${OWNER:+pid }${OWNER:-an unproven process} born outside the Aqua login session ($BIRTH); its panes cannot reach the login keychain, taking the session over"
+  log "session $SESSION is served by pid $OWNER born in the Aqua login session ($BIRTH); nothing to do"
+  exit 0
 fi
+
+log "session $SESSION is served by ${OWNER:+pid }${OWNER:-an unproven process} born outside the Aqua login session ($BIRTH); its panes cannot reach the login keychain, taking the session over"
 HERDR_SESSION="$SESSION" "$HERDR_BIN" server stop --session "$SESSION" >/dev/null 2>&1 \
   || log "herdr server stop for session $SESSION did not succeed; waiting for the socket anyway"
 i=0

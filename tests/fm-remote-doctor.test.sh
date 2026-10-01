@@ -187,7 +187,8 @@ EOF
         # The real job detaches with the same PID, then the guard replaces
         # an unready owner. This fixture supplies the post-launch status.
         printf '%s\n' "$FM_FAKE_AQUA_PID" > "$FM_FAKE_STATE/socket-owner"
-        printf '{"detached_server_daemon":true}\n' > "$FM_FAKE_STATE/capabilities"
+        [ -f "$FM_FAKE_STATE/kickstart-not-detached" ] \
+          || printf '{"detached_server_daemon":true}\n' > "$FM_FAKE_STATE/capabilities"
         if [ -f "$FM_FAKE_STATE/kickstart-delay" ]; then
           cp "$FM_FAKE_STATE/kickstart-delay" "$FM_FAKE_STATE/herdr-delay"
         else
@@ -265,6 +266,10 @@ case "${1:-} ${2:-}" in
     capabilities=$(cat "$FM_FAKE_STATE/capabilities")
     printf '{"client":{"version":"0.9.2","protocol":16},"server":{"running":%s,"socket":"%s","capabilities":%s}}\n' \
       "$running" "$FM_FAKE_HERDR_SOCKET" "$capabilities"
+    ;;
+  "server stop")
+    printf '%s\n' "$*" >> "$FM_FAKE_STATE/herdr.log"
+    printf 'false\n' > "$FM_FAKE_HERDR_RUNNING"
     ;;
   "server "*|"server ")
     printf 'true\n' > "$FM_FAKE_HERDR_RUNNING"
@@ -618,21 +623,74 @@ expect_code 0 "$DOCTOR_RC" "the Aqua-owner fixture could not be initialized"
 assert_contains "$DOCTOR_OUT" "check herdr-server=ok: session fm-remote is running in the Aqua login session (pid $AQUA_HOLDER_PID, launchd)" \
   "a launchd-born owner was not reported with its pid and birth"
 
-# A running Aqua server can still be unusable as a saved machine.
+assert_contains "$DOCTOR_OUT" 'check saved-machine=ok: session fm-remote reports detached_server_daemon=true' \
+  "a detached Aqua server was not reported savable"
+
+# A missing saved-machine capability never blocks readiness or restarts the
+# server on a routine pass, read-only or --fix.
 for capabilities in '{"detached_server_daemon":false}' '{}' '{"detached_server_daemon":"true"}'; do
   printf '%s\n' "$capabilities" > "$CASE_STATE/capabilities"
   : > "$CASE_LAUNCHCTL_LOG"
-  doctor
-  expect_code 1 "$DOCTOR_RC" "the doctor accepted an Aqua server without the detached capability"
-  assert_contains "$DOCTOR_OUT" 'lacks detached_server_daemon=true' "the doctor did not name the saved-machine gap"
-  [ ! -s "$CASE_LAUNCHCTL_LOG" ] || assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" kickstart \
-    "a read-only doctor run restarted the non-detached server"
-  doctor --fix
-  expect_code 0 "$DOCTOR_RC" "the doctor did not repair the non-detached Aqua server"
-  assert_grep "kickstart -k gui/$(id -u)/$LABEL" "$CASE_LAUNCHCTL_LOG" "the capability repair bypassed launchd"
-  assert_contains "$DOCTOR_OUT" 'detached_server_daemon=true' "the doctor did not verify the repaired capability"
+  rm -f "$CASE_STATE/herdr.log"
+  for mode in check --fix; do
+    if [ "$mode" = check ]; then doctor; else doctor --fix; fi
+    expect_code 0 "$DOCTOR_RC" "a routine $mode pass refused an Aqua server without the detached capability"
+    assert_contains "$DOCTOR_OUT" "check herdr-server=ok: session fm-remote is running in the Aqua login session (pid $AQUA_HOLDER_PID, launchd)" \
+      "a routine $mode pass did not keep the Aqua server ready"
+    assert_contains "$DOCTOR_OUT" 'check saved-machine=advisory: session fm-remote lacks detached_server_daemon=true' \
+      "a routine $mode pass did not report the saved-machine advisory"
+    assert_contains "$DOCTOR_OUT" 'action: saved-machine: to save the host as a Herdr machine, rerun this command with --replace-server' \
+      "a routine $mode pass did not name the deliberate replacement step"
+  done
+  assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" bootout "a routine pass unloaded the launch agent for the saved-machine capability"
+  assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" kickstart "a routine pass restarted the launch agent for the saved-machine capability"
+  assert_absent "$CASE_STATE/herdr.log" "a routine pass stopped the server for the saved-machine capability"
 done
-pass "the doctor requires the detached capability and repairs an Aqua foreground server through launchd"
+pass "routine readiness passes keep a non-detached Aqua server and only advise the saved-machine gap"
+
+# The deliberate replacement stops the server once and restarts the agent.
+printf '{"detached_server_daemon":false}\n' > "$CASE_STATE/capabilities"
+: > "$CASE_LAUNCHCTL_LOG"
+doctor --replace-server
+expect_code 0 "$DOCTOR_RC" "the deliberate replacement did not leave the host savable"
+assert_contains "$DOCTOR_OUT" 'mode=replace-server' "the replacement mode was not reported"
+assert_grep 'server stop --session fm-remote' "$CASE_STATE/herdr.log" "the replacement did not stop the running server"
+assert_grep "kickstart -k gui/$(id -u)/$LABEL" "$CASE_LAUNCHCTL_LOG" "the replacement bypassed launchd"
+assert_contains "$DOCTOR_OUT" 'fix saved-machine=applied:' "the replacement was not reported as applied"
+assert_contains "$DOCTOR_OUT" 'check saved-machine=ok: session fm-remote reports detached_server_daemon=true' \
+  "the replacement did not verify the capability"
+pass "--replace-server deliberately replaces a non-detached Aqua server through launchd"
+
+# A replacement that still yields no capability is a human gap, not a retry.
+printf '{"detached_server_daemon":false}\n' > "$CASE_STATE/capabilities"
+touch "$CASE_STATE/kickstart-not-detached"
+: > "$CASE_LAUNCHCTL_LOG"
+rm -f "$CASE_STATE/herdr.log"
+doctor --replace-server
+expect_code 1 "$DOCTOR_RC" "a replacement without the capability was reported savable"
+assert_contains "$DOCTOR_OUT" 'check herdr-server=ok:' "the replaced server lost second-mate readiness"
+assert_contains "$DOCTOR_OUT" 'check saved-machine=human: session fm-remote still lacks detached_server_daemon=true after its deliberate replacement' \
+  "the persistent capability gap was not reported as human"
+[ "$(grep -c 'server stop' "$CASE_STATE/herdr.log")" -eq 1 ] || fail "the replacement stopped the server more than once"
+[ "$(grep -c kickstart "$CASE_LAUNCHCTL_LOG")" -eq 1 ] || fail "the replacement retried the launch agent"
+: > "$CASE_LAUNCHCTL_LOG"
+doctor --fix
+expect_code 0 "$DOCTOR_RC" "a routine pass after a failed replacement refused the Aqua server"
+assert_contains "$DOCTOR_OUT" 'check saved-machine=advisory:' "a routine pass after a failed replacement did not return to the advisory"
+assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" kickstart "a routine pass retried the failed replacement"
+rm -f "$CASE_STATE/kickstart-not-detached"
+printf '{"detached_server_daemon":true}\n' > "$CASE_STATE/capabilities"
+pass "a replacement that leaves the capability missing reports a human gap once"
+
+# The replacement refuses a host that is not ready for second mates.
+printf '%s\n' "$SSH_HOLDER_PID" > "$CASE_STATE/socket-owner"
+rm -f "$CASE_STATE/herdr.log"
+doctor --replace-server
+expect_code 1 "$DOCTOR_RC" "the replacement accepted an SSH-born server"
+assert_contains "$DOCTOR_OUT" 'fix saved-machine=failed:' "the refused replacement was not reported"
+assert_absent "$CASE_STATE/herdr.log" "the refused replacement stopped the server"
+printf '%s\n' "$AQUA_HOLDER_PID" > "$CASE_STATE/socket-owner"
+pass "--replace-server never acts on a host with second-mate readiness gaps"
 
 printf '%s\n' "$BACKGROUND_HOLDER_PID" > "$CASE_STATE/socket-owner"
 printf 'background job\n' > "$CASE_STATE/user-loaded-$LABEL"

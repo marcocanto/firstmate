@@ -2,7 +2,7 @@
 # Check, and optionally repair, one remote account's second-mate readiness.
 #
 # Usage:
-#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix] [--harness omp]
+#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix|--replace-server] [--harness omp]
 #
 # Run it through fm-on.sh so the fixed entrypoint invokes this readiness owner
 # over its plain SSH bootstrap. The command reports the same filesystem-composed
@@ -18,9 +18,10 @@
 # gui/<uid> domain supplies the Aqua audit session and login-keychain access.
 # The launcher uses Perl POSIX to detach the Unix session with the same PID,
 # then execs the guard, which execs Herdr under launchd. The guard leaves an
-# Aqua-born detached server alone and takes over every other owner.
-# bin/fm-remote-herdr-owner-lib.sh owns the birth test. Doctor checks both
-# Aqua birth and the detached_server_daemon capability on darwin.
+# Aqua-born server alone and takes over every other owner.
+# bin/fm-remote-herdr-owner-lib.sh owns the birth test. Second-mate readiness
+# needs only Aqua birth on darwin. The detached_server_daemon capability that
+# Herdr saved machines need is the separate, non-blocking saved-machine check.
 # Doctor remains invokable over the plain-SSH bootstrap path to repair the worker.
 # SSH cannot create an Aqua session, so a host with no GUI login is a human
 # gap rather than something --fix attempts to bypass.
@@ -36,23 +37,24 @@
 # harness-agnostic.
 #
 # Line protocol, one fact per line, stable for script consumers:
-#   mode=check|fix
+#   mode=check|fix|replace-server
 #   path=<the child PATH this command inherited>
 #   entrypoint=yes|no
 #   platform=darwin|linux|<uname -s>|unknown
 #   required <tool>=<path>|MISSING
 #   optional <tool>=<path>|absent
-#   fix <check>=applied: <what changed>       (--fix only)
-#   fix <check>=failed: <why the repair did not land>   (--fix only)
+#   fix <check>=applied: <what changed>       (--fix or --replace-server only)
+#   fix <check>=failed: <why the repair did not land>   (--fix or --replace-server only)
 #   check <check>=ok: <evidence>
 #   check <check>=skip: <why this host is exempt>
 #   check <check>=fixable: <gap --fix can close>
+#   check <check>=advisory: <non-blocking gap outside second-mate readiness>
 #   check <check>=human: <gap only a person at that machine can close>
 #   action: <check>: <the exact step to take>
 # Every check line is authoritative for the moment it printed: under --fix it is
 # the state after the repair attempt, so a human gap is never presented as
 # fixed. Any remaining fixable or human gap, and any missing required tool,
-# exits non-zero.
+# exits non-zero. An advisory gap prints its action but never fails the run.
 #
 # --fix is idempotent and closes only automatable gaps: it writes and reloads
 # both Firstmate-owned Aqua agents, starts the Linux workers where no Aqua agent
@@ -60,7 +62,15 @@
 # wrapper for a required tool it can discover under nvm, asdf, or mise. It never
 # installs packages, creates a login session, writes an auto-login password,
 # changes FileVault, stores an account password, or replaces a non-Firstmate
-# wrapper; those remain reported gaps.
+# wrapper; those remain reported gaps. It never replaces a running Aqua-born
+# server for the saved-machine capability.
+#
+# --replace-server is the deliberate operator step for that advisory on darwin:
+# it stops the Aqua-born fm-remote server that lacks detached_server_daemon=true
+# and restarts the launch agent, which closes every pane in the session, so the
+# second mates must be relaunched. It runs only when the host is otherwise ready
+# and makes one attempt; a capability still missing afterwards is a human gap.
+# Automatic readiness callers never pass it.
 set -eu
 
 # Resolve this script's directory with builtins only: a host missing a required
@@ -99,6 +109,10 @@ while [ "$#" -gt 0 ]; do
     --fix)
       [ "$MODE" = check ] || usage
       MODE=fix
+      ;;
+    --replace-server)
+      [ "$MODE" = check ] || usage
+      MODE=replace-server
       ;;
     --worker-tool-probe)
       [ "${FM_REMOTE_JOB_ACTIVE:-}" = 1 ] || { printf 'error: worker tool probe requires the remote job worker\n' >&2; exit 64; }
@@ -218,13 +232,12 @@ herdr_server_birth() {
   printf '%s %s\n' "$birth" "$owner"
 }
 
-# On darwin the session is ready only with an Aqua-born detached server;
-# elsewhere any running server is.
+# On darwin the session is ready only when its server was born in the Aqua
+# login session; elsewhere any running server is.
 herdr_server_aqua_owned() {
   local birth
   herdr_server_running || return 1
   [ "$PLATFORM" = darwin ] || return 0
-  herdr_server_detached || return 1
   birth=$(herdr_server_birth)
   fm_remote_herdr_birth_is_aqua "${birth%% *}"
 }
@@ -717,12 +730,7 @@ check_herdr_server() {
     birth=$(herdr_server_birth)
     case "$birth" in
       launchd\ *|worker\ *)
-        if herdr_server_detached; then
-          record herdr-server "ok: session $HERDR_SESSION_NAME is running in the Aqua login session (pid ${birth#* }, ${birth%% *}); detached_server_daemon=true"
-        else
-          record herdr-server "fixable: session $HERDR_SESSION_NAME is running in the Aqua login session but lacks detached_server_daemon=true, so saved machines cannot use it" \
-            "rerun this command with --fix to replace it through the launch agent (its current panes close and the parent firstmate relaunches its mates)"
-        fi
+        record herdr-server "ok: session $HERDR_SESSION_NAME is running in the Aqua login session (pid ${birth#* }, ${birth%% *})"
         ;;
       nolsof)
         record herdr-server "human: session $HERDR_SESSION_NAME is running but lsof does not resolve, so its server's birth cannot be proven" \
@@ -746,6 +754,21 @@ check_herdr_server() {
   fi
   record herdr-server "fixable: the herdr server for session $HERDR_SESSION_NAME is not running" \
     "rerun this command with --fix to start it"
+}
+
+# Saved Herdr machines need a detached server daemon; second mates do not, so
+# a missing capability is advisory until a deliberate --replace-server attempt.
+check_saved_machine() {
+  [ "$PLATFORM" = darwin ] && check_is_ok herdr-server || return 0
+  if herdr_server_detached; then
+    record saved-machine "ok: session $HERDR_SESSION_NAME reports detached_server_daemon=true, so the host can be saved as a Herdr machine"
+  elif [ "$SERVER_REPLACED" -eq 1 ]; then
+    record saved-machine "human: session $HERDR_SESSION_NAME still lacks detached_server_daemon=true after its deliberate replacement, so the host cannot be saved as a Herdr machine" \
+      "check the herdr version on that host and $LAUNCH_AGENT_LOG; --replace-server is not retried automatically, and the second mates must be relaunched"
+  else
+    record saved-machine "advisory: session $HERDR_SESSION_NAME lacks detached_server_daemon=true, so the host cannot be saved as a Herdr machine; second mates are unaffected" \
+      "to save the host as a Herdr machine, rerun this command with --replace-server; it closes every pane in session $HERDR_SESSION_NAME, so relaunch the second mates afterward"
+  fi
 }
 
 check_entrypoint_link() {
@@ -778,6 +801,7 @@ run_checks() { # <resolved-login-shell>
   check_remote_job_worker
   check_launch_agent "$shell"
   check_herdr_server
+  check_saved_machine
   check_entrypoint_link
   check_omp
 }
@@ -839,7 +863,7 @@ reload_launch_agent() { # <check-to-report-under>
     return 1
   fi
   if ! wait_for_herdr_server; then
-    fix_report "$report" failed "the herdr server for session $HERDR_SESSION_NAME did not report Aqua birth and detached_server_daemon=true within 10s"
+    fix_report "$report" failed "the herdr server for session $HERDR_SESSION_NAME did not come up inside the Aqua launch agent within 10s"
     return 1
   fi
   fix_report "$report" applied "bootstrapped and started $LAUNCH_AGENT_LABEL in gui/$UID_NUM"
@@ -866,6 +890,38 @@ start_herdr_server() {
   fi
   fix_report herdr-server failed "the herdr server for session $HERDR_SESSION_NAME did not come up"
   return 1
+}
+
+# One deliberate replacement of an Aqua-born server that lacks the detached
+# capability: stop it, wait for the socket to clear, then restart the agent.
+replace_herdr_server() {
+  local i=0
+  case "$(check_value saved-machine 2>/dev/null || true)" in
+    ok:*) return 0 ;;
+    advisory:*) ;;
+    *)
+      fix_report saved-machine failed "session $HERDR_SESSION_NAME is not ready for second mates on a darwin Aqua launch agent; close the gaps above with --fix first"
+      return 1
+      ;;
+  esac
+  if ! check_is_ok launchagent-loaded; then
+    fix_report saved-machine failed "$LAUNCH_AGENT_LABEL does not match the loaded Firstmate-owned contract; close that gap with --fix first"
+    return 1
+  fi
+  if ! fm_backend_herdr_cli "$HERDR_SESSION_NAME" server stop >/dev/null 2>&1; then
+    fix_report saved-machine failed "herdr server stop for session $HERDR_SESSION_NAME did not succeed"
+    return 1
+  fi
+  SERVER_REPLACED=1
+  while herdr_server_running; do
+    if [ "$i" -ge 20 ]; then
+      fix_report saved-machine failed "the herdr server for session $HERDR_SESSION_NAME did not stop within 10s"
+      return 1
+    fi
+    i=$((i + 1))
+    sleep 0.5
+  done
+  reload_launch_agent saved-machine
 }
 
 link_entrypoint() {
@@ -947,6 +1003,7 @@ else
 fi
 printf 'platform=%s\n' "$PLATFORM"
 
+SERVER_REPLACED=0
 LAUNCH_AGENT_SHELL=
 if [ "$PLATFORM" = darwin ]; then
   LAUNCH_AGENT_SHELL=$(resolve_launch_agent_shell)
@@ -956,6 +1013,9 @@ if [ "$MODE" = fix ]; then
   apply_fixes "$LAUNCH_AGENT_SHELL"
   # Re-derive every check from the host itself, so what prints below is the
   # state after repair rather than the intent of a repair.
+  run_checks "$LAUNCH_AGENT_SHELL"
+elif [ "$MODE" = replace-server ]; then
+  replace_herdr_server || true
   run_checks "$LAUNCH_AGENT_SHELL"
 fi
 
@@ -973,15 +1033,17 @@ for tool in "${OPTIONAL_TOOLS[@]}"; do
 done
 
 GAPS=()
+ACTIONABLE=()
 i=0
 while [ "$i" -lt "${#CHECK_NAMES[@]}" ]; do
   printf 'check %s=%s\n' "${CHECK_NAMES[$i]}" "${CHECK_VALUES[$i]}"
   case "${CHECK_VALUES[$i]}" in
-    fixable:*|human:*) GAPS+=("$i") ;;
+    fixable:*|human:*) GAPS+=("$i"); ACTIONABLE+=("$i") ;;
+    advisory:*) ACTIONABLE+=("$i") ;;
   esac
   i=$((i + 1))
 done
-for i in ${GAPS[@]+"${GAPS[@]}"}; do
+for i in ${ACTIONABLE[@]+"${ACTIONABLE[@]}"}; do
   [ -z "${CHECK_ACTIONS[$i]}" ] || printf 'action: %s: %s\n' "${CHECK_NAMES[$i]}" "${CHECK_ACTIONS[$i]}"
 done
 

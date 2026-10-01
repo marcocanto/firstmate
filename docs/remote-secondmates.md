@@ -231,6 +231,7 @@ Each gap carries one of two tags:
 
 Every gap is followed by an `action:` line naming the exact step.
 Any remaining gap exits non-zero.
+An `advisory:` line also carries an `action:` line, but it is outside second-mate readiness and never fails the run.
 The script's own header owns the full line protocol.
 
 ### Repair with --fix
@@ -261,6 +262,7 @@ The `gui/<uid>` domain, not the login shell, is what gives that server and every
 The launcher detaches its Unix session with Perl POSIX and execs the guard without changing its PID.
 If the guard starts the server, Herdr keeps that PID and launchd supervises it.
 Herdr reports `detached_server_daemon:true` when that process leads its Unix session, which saved machines require.
+Second mates do not require it, so the doctor reports it as the separate, non-blocking `saved-machine` check.
 The launcher does not use Herdr's terminal-dependent client auto-start path or switch its macOS bootstrap context.
 `RunAtLoad` starts the job when the GUI login session loads.
 `KeepAlive={SuccessfulExit=false}` retries a crash or launch failure of that job-owned server after the throttle interval.
@@ -271,9 +273,9 @@ Every claude pane under such a server falls back to a stale plaintext credential
 
 Herdr's own SSH remote attach starts a server born in another session when it finds none.
 At boot, that server wins the `fm-remote` socket, because sshd accepts connections before the login session exists.
-The guard replaces a foreign owner or an Aqua-born server that lacks the detached-daemon capability.
+The guard replaces a foreign owner.
 That replacement closes the session's panes, so the parent firstmate must relaunch its second mates.
-It leaves an Aqua-born detached server alone and exits 0.
+It leaves any Aqua-born server alone and exits 0, whether or not that server reports the detached-daemon capability.
 The restart policy lets that successful exit rest instead of respawning against a held socket.
 The guard's [header](../bin/fm-remote-herdr-guard.sh) owns the full decision table, and [`bin/fm-remote-herdr-owner-lib.sh`](../bin/fm-remote-herdr-owner-lib.sh) owns the birth markers.
 
@@ -284,7 +286,22 @@ It does not give a standalone saved-machine session an automatic restart guarant
 
 ### Add the host to the Herdr sidebar
 
-After the doctor reports the host ready, run this from the primary's Herdr client:
+The host can be saved only when the doctor reports `check saved-machine=ok:`.
+An Aqua-born server started before the same-PID launcher, or by the remote-job worker, reports `check saved-machine=advisory:` instead.
+No automatic readiness pass replaces that server: launch, relaunch, home seeding, and liveness probes never reload the launch agent or stop the server for this reason.
+Replacing it is a deliberate operator step:
+
+```sh
+bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh --replace-server
+```
+
+It runs only when the host is otherwise ready for second mates.
+It stops the `fm-remote` server and restarts the launch agent, which closes every pane in that session.
+Relaunch the host's second mates afterward.
+It makes one attempt.
+If the capability is still missing, it reports `check saved-machine=human:` and does not retry; check the host's Herdr version and the launch agent log before trying again.
+
+After the doctor reports the host savable, run this from the primary's Herdr client:
 
 ```sh
 herdr machine add <ssh-alias> --remote-session fm-remote --label <label>

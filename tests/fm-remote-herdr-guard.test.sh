@@ -5,8 +5,8 @@
 # sources) against a fake herdr CLI, a fake lsof that names a real holder
 # process as the session-socket owner, and real Python holder processes whose
 # environment and ancestry carry the birth markers the guard reads. It pins
-# the decision table: no server -> start; an Aqua-born detached owner -> leave
-# it; a non-detached, SSH-born, or unprovable owner -> stop, wait, then start.
+# the decision table: no server -> start; an Aqua-born owner, detached or not
+# -> leave it; an SSH-born or unprovable owner -> stop, wait, then start.
 # Nothing here touches the runner's own herdr servers, launch agents, or login
 # session, and no live harness guard applies: the verdict comes from process
 # environment and ancestry, which are kernel facts rather than vendor output.
@@ -254,18 +254,19 @@ assert_contains "$GUARD_OUT" "pid $WORKER_PID born in the Aqua login session (wo
   "the guard did not name the worker owner"
 pass "launchd and worker markers require gui-domain launchctl proof"
 
-# Aqua birth alone is insufficient for a saved machine.
+# The saved-machine capability is never the guard's reason to stop a server.
 for capabilities in '{"detached_server_daemon":false}' '{}' '{"detached_server_daemon":"true"}'; do
   new_case running
   printf '%s\n' "$LAUNCHD_PID" > "$CASE_OWNER"
   load_job gui dev.firstmate.herdr.fm-remote "$LAUNCHD_PID"
   printf '%s\n' "$capabilities" > "$CASE_STATE/capabilities"
   guard
-  expect_code 0 "$GUARD_RC" "the guard failed to replace an Aqua owner without the detached capability"
-  assert_stop_before_start
-  assert_contains "$GUARD_OUT" 'saved machines require a detached server' "the guard did not name the capability gap"
+  expect_code 0 "$GUARD_RC" "the guard did not leave an Aqua owner without the detached capability alone"
+  assert_contains "$GUARD_OUT" 'nothing to do' "the guard did not leave the Aqua owner alone"
+  assert_not_started "the guard started a second server over a non-detached Aqua owner"
+  assert_not_contains "$(herdr_calls)" 'server stop' "the guard stopped an Aqua owner for the saved-machine capability"
 done
-pass "an Aqua owner requires a boolean detached capability before the guard leaves it alone"
+pass "the guard leaves an Aqua owner alone whatever its detached capability"
 
 # --- a foreign owner is stopped, then the guard becomes the server -----------
 

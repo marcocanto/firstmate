@@ -1112,7 +1112,7 @@ A second `launchctl kickstart -k gui/501/dev.fm-rca.herdr-fg` started pid 45574,
 This proves that Herdr 0.9.0 remains in the foreground as the launchd job and that a successful stop lets the job rest.
 It does not verify the same-PID Unix-session detachment now used by `bin/fm-remote-herdr-launch.sh`.
 
-`tests/fm-remote-herdr-guard.test.sh` and `tests/fm-remote-doctor.test.sh` cover Aqua birth and the boolean detached capability as separate readiness conditions.
+`tests/fm-remote-herdr-guard.test.sh` and `tests/fm-remote-doctor.test.sh` cover Aqua birth as the readiness condition and the boolean detached capability as the separate saved-machine check, which only the deliberate `--replace-server` step acts on.
 
 On 2026-09-30, the real launcher and guard executed a process observer instead of Herdr on Darwin 25.6.0 arm64 with Perl 5.34.1 and Python 3.14.4:
 
