@@ -495,9 +495,12 @@ report_required_tools() {
   MISSING+=(harness)
 }
 
+# The worker runs this same script with the same platform source, so the
+# accepted facts are exactly REQUIRED_TOOLS for this platform plus harness.
 report_required_tools_from_worker() {
   local job_id probe_stdout probe_stderr probe_exit line fact name value
-  local expected=6 count=0 valid=1 seen=' '
+  local accepted=" ${REQUIRED_TOOLS[*]} harness " expected=$((${#REQUIRED_TOOLS[@]} + 1))
+  local count=0 valid=1 seen=' '
   if ! job_id=$(fm_remote_job_stage "${HOME:-}" "$FM_ROOT" "${FM_HOME:-}" \
     fm-remote-doctor.sh --worker-tool-probe </dev/null); then
     set_check remote-job-probe "fixable: the remote job worker could not accept the required-tool probe" \
@@ -521,7 +524,8 @@ report_required_tools_from_worker() {
     fact=${line#required }
     name=${fact%%=*}
     value=${fact#*=}
-    case "$name" in git|jq|herdr|tasks-axi|treehouse|harness) ;; *) valid=0; continue ;; esac
+    case "$name" in ''|*' '*) valid=0; continue ;; esac
+    case "$accepted" in *" $name "*) ;; *) valid=0; continue ;; esac
     case "$seen" in *" $name "*) valid=0; continue ;; esac
     seen="$seen$name "
     count=$((count + 1))
