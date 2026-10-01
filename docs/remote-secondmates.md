@@ -258,11 +258,12 @@ It resolves that shell in this order, so the server inherits the account's own e
 3. `/bin/sh`.
 
 The `gui/<uid>` domain, not the login shell, is what gives that server and every pane it spawns the Aqua audit session and login-keychain access.
-The launcher detaches the Unix session with Perl POSIX, then execs the guard and Herdr without replacing the process PID that launchd supervises.
+The launcher detaches its Unix session with Perl POSIX and execs the guard without changing its PID.
+If the guard starts the server, Herdr keeps that PID and launchd supervises it.
 Herdr reports `detached_server_daemon:true` when that process leads its Unix session, which saved machines require.
 The launcher does not use Herdr's terminal-dependent client auto-start path or switch its macOS bootstrap context.
 `RunAtLoad` starts the job when the GUI login session loads.
-`KeepAlive={SuccessfulExit=false}` retries a crash or launch failure after the throttle interval.
+`KeepAlive={SuccessfulExit=false}` retries a crash or launch failure of that job-owned server after the throttle interval.
 A server born in any other session cannot read the login keychain.
 Every claude pane under such a server falls back to a stale plaintext credentials file and reports "Login expired".
 
@@ -275,6 +276,11 @@ That replacement closes the session's panes, so the parent firstmate must relaun
 It leaves an Aqua-born detached server alone and exits 0.
 The restart policy lets that successful exit rest instead of respawning against a held socket.
 The guard's [header](../bin/fm-remote-herdr-guard.sh) owns the full decision table, and [`bin/fm-remote-herdr-owner-lib.sh`](../bin/fm-remote-herdr-owner-lib.sh) owns the birth markers.
+
+The successful no-op does not adopt a pre-existing worker-owned daemon into this launch agent.
+A running parent can attempt [liveness recovery](#liveness-recovery) for a registered remote second mate after it confirms that the server stopped.
+That recovery remains conditional on a reachable host and conclusive state.
+It does not give a standalone saved-machine session an automatic restart guarantee.
 
 ### Add the host to the Herdr sidebar
 
