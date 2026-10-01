@@ -3,18 +3,19 @@
 #
 # Drives the real bin/fm-remote-herdr-guard.sh (and the owner library it
 # sources) against a fake herdr CLI, a fake lsof that names a real holder
-# process as the session-socket owner, and real holder processes whose
+# process as the session-socket owner, and real Python holder processes whose
 # environment and ancestry carry the birth markers the guard reads. It pins
-# the decision table: no server -> start; an Aqua-born owner -> leave it; an
-# SSH-born or unprovable owner -> stop it, wait for the socket, start. Nothing
-# here touches the runner's own herdr servers, launch agents, or login
+# the decision table: no server -> start; an Aqua-born owner, detached or not
+# -> leave it; an SSH-born or unprovable owner -> stop, wait, then start.
+# Nothing here touches the runner's own herdr servers, launch agents, or login
 # session, and no live harness guard applies: the verdict comes from process
 # environment and ancestry, which are kernel facts rather than vendor output.
 set -u
 
 # shellcheck source=tests/lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-command -v jq >/dev/null 2>&1 || { echo "skip: jq not found (the guard parses herdr's JSON, and jq is the holder process)"; exit 0; }
+command -v jq >/dev/null 2>&1 || { echo 'skip: jq not found (the guard parses Herdr JSON)'; exit 0; }
+command -v python3 >/dev/null 2>&1 || { echo 'skip: python3 not found (non-platform environment holders)'; exit 0; }
 command -v mkfifo >/dev/null 2>&1 || { echo "skip: mkfifo not found (holder processes block on a fifo)"; exit 0; }
 
 TMP_ROOT=$(fm_test_tmproot fm-remote-herdr-guard)
@@ -26,6 +27,9 @@ trap 'if [ "${#HOLDER_PIDS[@]}" -gt 0 ]; then kill "${HOLDER_PIDS[@]}" 2>/dev/nu
 
 GUARD="$ROOT/bin/fm-remote-herdr-guard.sh"
 JQ=$(command -v jq)
+PYTHON=$(command -v python3)
+HOLDER_SCRIPT="$TMP_ROOT/holder.py"
+printf 'import sys\nopen(sys.argv[1]).read()\n' > "$HOLDER_SCRIPT"
 SESSION=fm-remote
 
 # The guard must see only the fixture and the system tools it really needs,
@@ -77,8 +81,9 @@ case "$*" in
         running=false
       fi
     fi
-    printf '{"server":{"running":%s,"socket":"%s","version":"0.9.0"},"client":{"version":"0.9.0"}}\n' \
-      "$running" "$FM_FAKE_HERDR_SOCKET"
+    capabilities=$(cat "$FM_FAKE_STATE/capabilities")
+    printf '{"server":{"running":%s,"socket":"%s","version":"0.9.2","capabilities":%s},"client":{"version":"0.9.2"}}\n' \
+      "$running" "$FM_FAKE_HERDR_SOCKET" "$capabilities"
     ;;
   "server stop --session "*)
     if [ -f "$FM_FAKE_STATE/stop-ignored" ]; then
@@ -98,8 +103,8 @@ SH
 chmod +x "$FAKE/lsof" "$FAKE/launchctl" "$FAKE/herdr"
 cp "$FAKE/lsof" "$TMP_ROOT/lsof.fake"
 
-# hold <marker-env...> -> HOLDER_PID: a real non-platform process (jq blocked
-# on a fifo this test keeps open) whose environment is exactly the markers.
+# hold <marker-env...> -> HOLDER_PID: a real Python process blocked on a fifo
+# this test keeps open, with exactly the marker environment.
 hold() {
   local fifo="$TMP_ROOT/holder-$HOLDER_FD.fifo"
   rm -f "$fifo"
@@ -107,7 +112,7 @@ hold() {
   # Open read-write so this never blocks on the reader; the holder sees EOF
   # only when the descriptor closes at exit.
   eval "exec ${HOLDER_FD}<>\"\$fifo\""
-  env -i "$@" "$JQ" . "$fifo" &
+  env -i "$@" "$PYTHON" "$HOLDER_SCRIPT" "$fifo" &
   HOLDER_PID=$!
   HOLDER_PIDS+=("$HOLDER_PID")
   HOLDER_FD=$((HOLDER_FD + 1))
@@ -121,8 +126,8 @@ hold_under() {
   rm -f "$fifo" "$pidfile"
   mkfifo "$fifo"
   eval "exec ${HOLDER_FD}<>\"\$fifo\""
-  ( export FM_HOLDER_JQ="$JQ" FM_HOLDER_FIFO="$fifo" FM_HOLDER_PIDFILE="$pidfile"
-    exec -a "$argv0" bash -c 'env -i FM_HOLDER=1 "$FM_HOLDER_JQ" . "$FM_HOLDER_FIFO" & printf "%s\n" "$!" > "$FM_HOLDER_PIDFILE"; wait' "$@" ) &
+  ( export FM_HOLDER_PYTHON="$PYTHON" FM_HOLDER_SCRIPT="$HOLDER_SCRIPT" FM_HOLDER_FIFO="$fifo" FM_HOLDER_PIDFILE="$pidfile"
+    exec -a "$argv0" bash -c 'env -i FM_HOLDER=1 "$FM_HOLDER_PYTHON" "$FM_HOLDER_SCRIPT" "$FM_HOLDER_FIFO" & printf "%s\n" "$!" > "$FM_HOLDER_PIDFILE"; wait' "$@" ) &
   HOLDER_PIDS+=("$!")
   HOLDER_FD=$((HOLDER_FD + 1))
   local i=0
@@ -141,6 +146,7 @@ new_case() { # [running|stopped]
   : > "$CASE_LOG"
   CASE_RUNNING="$CASE_STATE/running"
   printf '%s\n' "$([ "${1:-running}" = running ] && printf true || printf false)" > "$CASE_RUNNING"
+  printf '{"detached_server_daemon":true}\n' > "$CASE_STATE/capabilities"
   CASE_OWNER="$CASE_STATE/socket-owner"
   CASE_SOCKET="$CASE_STATE/herdr.sock"
   CASE_PATH="$FAKE:$TOOLS"
@@ -160,7 +166,6 @@ guard() { # [extra env assignments...]
     env -i PATH="$CASE_PATH" HOME="$TMP_ROOT" \
       FM_FAKE_STATE="$CASE_STATE" FM_FAKE_HERDR_LOG="$CASE_LOG" FM_FAKE_HERDR_RUNNING="$CASE_RUNNING" \
       FM_FAKE_SOCKET_OWNER="$CASE_OWNER" FM_FAKE_HERDR_SOCKET="$CASE_SOCKET" \
-      FM_HOLDER_JQ="$JQ" \
       FM_REMOTE_HERDR_GUARD_STOP_WAIT_TENTHS=8 \
       "$@" "$GUARD" "$FAKE/herdr" "$SESSION" 2>&1
   )
@@ -184,7 +189,7 @@ assert_stop_before_start() {
   [ "$stop_line" -lt "$start_line" ] || fail "the guard started its server before stopping the foreign one"
 }
 
-# Prove the holder construction on this host: the environment of a jq holder
+# Prove the holder construction on this host: its environment
 # must be readable, or every marker case would be vacuous.
 hold FM_PROBE_MARKER=1
 PROBE_PID=$HOLDER_PID
@@ -194,7 +199,7 @@ sleep 0.2
 probe_env=$(fm_remote_herdr_process_env "$PROBE_PID")
 case "$probe_env" in
   *FM_PROBE_MARKER=1*) ;;
-  *) fail "this host does not expose a holder's environment (macOS hides platform-binary environments; jq at $JQ must be a non-platform binary): $probe_env" ;;
+  *) fail "this host does not expose the Python holder environment (macOS hides platform-binary environments): $probe_env" ;;
 esac
 pass "holder processes expose their environment to the owner library"
 
@@ -218,13 +223,13 @@ hold XPC_SERVICE_NAME=0
 XPC_ZERO_PID=$HOLDER_PID
 hold FM_REMOTE_JOB_ACTIVE=1
 WORKER_PID=$HOLDER_PID
-hold SSH_CONNECTION='100.102.217.78 51234 100.100.1.2 22' SSH_CLIENT='100.102.217.78 51234 22'
+hold SSH_CONNECTION='<ssh-client> 12345 <ssh-host> 22' SSH_CLIENT='<ssh-client> 12345 22'
 SSH_PID=$HOLDER_PID
 hold FM_NOTHING_TO_SEE=1
 UNMARKED_PID=$HOLDER_PID
 hold_under herdr --session "$SESSION" remote-client-bridge
 BRIDGE_CHILD_PID=$HOLDER_PID
-hold_under 'sshd-session:' kunchen@notty
+hold_under 'sshd-session:' '<user>@notty'
 SSHD_CHILD_PID=$HOLDER_PID
 sleep 0.3
 
@@ -248,6 +253,20 @@ assert_not_contains "$(herdr_calls)" 'server stop' "the guard stopped a gui-doma
 assert_contains "$GUARD_OUT" "pid $WORKER_PID born in the Aqua login session (worker)" \
   "the guard did not name the worker owner"
 pass "launchd and worker markers require gui-domain launchctl proof"
+
+# The saved-machine capability is never the guard's reason to stop a server.
+for capabilities in '{"detached_server_daemon":false}' '{}' '{"detached_server_daemon":"true"}'; do
+  new_case running
+  printf '%s\n' "$LAUNCHD_PID" > "$CASE_OWNER"
+  load_job gui dev.firstmate.herdr.fm-remote "$LAUNCHD_PID"
+  printf '%s\n' "$capabilities" > "$CASE_STATE/capabilities"
+  guard
+  expect_code 0 "$GUARD_RC" "the guard did not leave an Aqua owner without the detached capability alone"
+  assert_contains "$GUARD_OUT" 'nothing to do' "the guard did not leave the Aqua owner alone"
+  assert_not_started "the guard started a second server over a non-detached Aqua owner"
+  assert_not_contains "$(herdr_calls)" 'server stop' "the guard stopped an Aqua owner for the saved-machine capability"
+done
+pass "the guard leaves an Aqua owner alone whatever its detached capability"
 
 # --- a foreign owner is stopped, then the guard becomes the server -----------
 

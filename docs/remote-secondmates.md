@@ -231,6 +231,7 @@ Each gap carries one of two tags:
 
 Every gap is followed by an `action:` line naming the exact step.
 Any remaining gap exits non-zero.
+An `advisory:` check is outside second-mate readiness and never fails the run; its optional step prints on an `advice:` line instead of an `action:` line.
 The script's own header owns the full line protocol.
 
 ### Repair with --fix
@@ -250,7 +251,7 @@ Both are scoped with `LimitLoadToSessionType=Aqua` and bootstrapped in `gui/<uid
 
 ### How the Herdr launch agent starts its server
 
-The Herdr agent runs [`bin/fm-remote-herdr-guard.sh`](../bin/fm-remote-herdr-guard.sh) through a shell in login mode with separate `-l` and `-c` arguments.
+The Herdr agent runs [`bin/fm-remote-herdr-launch.sh`](../bin/fm-remote-herdr-launch.sh) through a shell in login mode with separate `-l` and `-c` arguments.
 It resolves that shell in this order, so the server inherits the account's own environment:
 
 1. The remote account's executable labeled Directory Services `UserShell`.
@@ -258,6 +259,13 @@ It resolves that shell in this order, so the server inherits the account's own e
 3. `/bin/sh`.
 
 The `gui/<uid>` domain, not the login shell, is what gives that server and every pane it spawns the Aqua audit session and login-keychain access.
+The launcher detaches its Unix session with Perl POSIX and execs the guard without changing its PID.
+If the guard starts the server, Herdr keeps that PID and launchd supervises it.
+Herdr reports `detached_server_daemon:true` when that process leads its Unix session, which saved machines require.
+Second mates do not require it, so the doctor reports it as the separate, non-blocking `saved-machine` check.
+The launcher does not use Herdr's terminal-dependent client auto-start path or switch its macOS bootstrap context.
+`RunAtLoad` starts the job when the GUI login session loads.
+`KeepAlive={SuccessfulExit=false}` retries a crash or launch failure of that job-owned server after the throttle interval.
 A server born in any other session cannot read the login keychain.
 Every claude pane under such a server falls back to a stale plaintext credentials file and reports "Login expired".
 
@@ -265,17 +273,50 @@ Every claude pane under such a server falls back to a stale plaintext credential
 
 Herdr's own SSH remote attach starts a server born in another session when it finds none.
 At boot, that server wins the `fm-remote` socket, because sshd accepts connections before the login session exists.
-The guard is what makes the launch agent converge.
-It acts on whichever server owns the `fm-remote` socket:
+The guard replaces a foreign owner.
+That replacement closes the session's panes, so the parent firstmate must relaunch its second mates.
+It leaves any Aqua-born server alone and exits 0, whether or not that server reports the detached-daemon capability.
+The restart policy lets that successful exit rest instead of respawning against a held socket.
+The guard's [header](../bin/fm-remote-herdr-guard.sh) owns the full decision table, and [`bin/fm-remote-herdr-owner-lib.sh`](../bin/fm-remote-herdr-owner-lib.sh) owns the birth markers.
 
-| Socket owner | Guard action |
-| --- | --- |
-| Nothing | Execs the server in the foreground under launchd. |
-| An Aqua-born server | Exits 0. |
-| Any other (foreign) server | Stops the foreign server and takes the session over, closing its panes so the parent firstmate relaunches its mates into the Aqua-born server. |
+The successful no-op does not adopt a pre-existing worker-owned daemon into this launch agent.
+A running parent can attempt [liveness recovery](#liveness-recovery) for a registered remote second mate after it confirms that the server stopped.
+That recovery remains conditional on a reachable host and conclusive state.
+It does not give a standalone saved-machine session an automatic restart guarantee.
 
-`KeepAlive={SuccessfulExit=false}` lets that exit 0 rest instead of respawning against a held socket.
-The guard's header owns the decision table, and [`bin/fm-remote-herdr-owner-lib.sh`](../bin/fm-remote-herdr-owner-lib.sh) owns the birth markers it reads.
+### Add the host to the Herdr sidebar
+
+The host can be saved only when the doctor reports `check saved-machine=ok:`.
+An Aqua-born server started before the same-PID launcher, or by the remote-job worker, reports `check saved-machine=advisory:` instead.
+No automatic readiness pass replaces that server: launch, relaunch, home seeding, and liveness probes never reload the launch agent or stop the server for this reason.
+
+An upgrade from a Firstmate version whose agent started the guard directly leaves that agent on the previous start target.
+While an Aqua-born server owns the session, the doctor reports that start-target-only drift as `check launchagent=advisory:` and `check launchagent-loaded=advisory:`.
+Automatic passes leave that agent and its running server alone, so the upgrade closes no panes.
+Any other launch-agent drift, or the same drift with no Aqua-born server running, stays `fixable:` and `--fix` rewrites and reloads the agent as before.
+Replacing it is a deliberate operator step:
+
+```sh
+bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh --replace-server
+```
+
+It runs only when the host is otherwise ready for second mates.
+It rewrites an agent still on the previous start target, stops the `fm-remote` server, and restarts the launch agent, which closes every pane in that session.
+Relaunch the host's second mates afterward.
+It makes one attempt.
+If the capability is still missing, it reports `check saved-machine=human:` and does not retry; check the host's Herdr version and the launch agent log before trying again.
+
+After the doctor reports the host savable, run this from the primary's Herdr client:
+
+```sh
+herdr machine add <ssh-alias> --remote-session fm-remote --label <label>
+herdr machine status
+```
+
+Confirm that the saved machine reports reachable.
+If Herdr asks whether to replace the remote server, answer **No**.
+Replacing it through SSH would bypass the Aqua launch agent and close the existing panes.
+Repair the host through the doctor instead, then relaunch its second mates before retrying the saved-machine setup.
 
 ### Other repairs and limits
 
@@ -313,7 +354,7 @@ A file at `~/.local/bin/fm-remote-entrypoint.sh` that is not Firstmate's own sym
 | Always required | `git`, `jq`, `herdr`, compatible `tasks-axi`, and `treehouse` |
 | At least one of | `claude`, `codex`, `opencode`, `pi`, `pi-signed`, `grok`, `kimi`, or `omp` |
 | Required when the second mate runs on omp | `omp`, reported as `check omp=` by `fm-remote-doctor.sh --harness omp`, which the launch and recovery gate passes for an omp route |
-| Additionally required on macOS | `lsof`, so the doctor and guard can prove which process owns the session socket |
+| Required on macOS | `lsof`, so the doctor and guard can prove the socket owner's birth, and `perl` with POSIX support for same-PID detachment |
 
 The doctor never checks runtime credentials, because no token-free command proves the selected model is usable, so the first live launch on a new host is the credential check.
 
@@ -698,6 +739,7 @@ bin/fm-test-run.sh tests/fm-remote-job.test.sh
 bin/fm-test-run.sh tests/fm-remote-transport-lanes.test.sh
 bin/fm-test-run.sh tests/fm-remote-doctor.test.sh
 bin/fm-test-run.sh tests/fm-remote-herdr-guard.test.sh
+bin/fm-test-run.sh tests/fm-remote-herdr-launch.test.sh
 bin/fm-test-run.sh tests/fm-project-origin.test.sh
 bin/fm-test-run.sh tests/fm-secondmate-sync.test.sh
 bin/fm-test-run.sh tests/fm-remote-reply.test.sh
@@ -716,6 +758,8 @@ The doctor performs these account-level checks, and they are only ever exercised
 
 So the readiness gate's behavior on a genuine Mac remains an operator-run smoke test.
 The audit-session facts the guard relies on are recorded with their commands in [runtime backend verification](verification/runtime-backends.md#fm-remote-server-birth-and-login-keychain-access).
+The launcher's portable test proves same-PID Unix detachment, inherited environment and descriptors, exit propagation, and crash identity.
+It does not prove a real LaunchAgent's audit context, login-keychain access, restart policy, or Herdr's saved-machine readiness.
 
 ### Real-host smoke test
 

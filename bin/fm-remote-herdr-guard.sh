@@ -1,27 +1,23 @@
 #!/usr/bin/env bash
-# launchd exec target for the Firstmate-owned dev.firstmate.herdr.fm-remote
-# launch agent: make the Aqua login session own the fm-remote Herdr server.
+# Guard for the Firstmate-owned dev.firstmate.herdr.fm-remote launch agent.
+# Make the Aqua login session own the fm-remote Herdr server.
 #
 # Usage:
 #   fm-remote-herdr-guard.sh <herdr-path> <session>
 #
-# bin/fm-remote-doctor.sh renders the launch agent as the account's login
-# shell running `exec <this script> <herdr> fm-remote` with
-# LimitLoadToSessionType=Aqua, RunAtLoad, KeepAlive={SuccessfulExit=false},
-# and ThrottleInterval=10, then bootstraps it into gui/<uid>. That domain, not
-# the login shell, is what gives this process and every server it execs the
-# Aqua audit session and login-keychain access; the login shell only gives the
-# server the account's own environment.
-# `herdr server` stays in the foreground under launchd, as verified in
-# docs/verification/runtime-backends.md under "fm-remote server birth and login-keychain access", so the final exec provides the complete supervision lifecycle.
+# bin/fm-remote-doctor.sh renders the launch agent through the account's login
+# shell and bin/fm-remote-herdr-launch.sh in gui/<uid>. The launcher detaches
+# the Unix session without forking away the tracked PID, then execs this guard.
+# The Aqua domain supplies the audit session and login-keychain access.
+# The login shell supplies the account's environment.
+# The final exec keeps the server under launchd with that same PID and context.
 #
 # Decision, made once per launch (exit codes matter under SuccessfulExit=false:
 # 0 tells launchd the job is done until something restarts it, non-zero asks
 # for a retry after the throttle interval):
 #   no server owns the session socket  -> exec `herdr server --session <s>`
-#                                          (foreground, launchd-supervised)
 #   the owner was born in the Aqua session (launchd or the Aqua remote-job
-#   worker)                            -> exit 0, leave it alone
+#   worker), detached or not           -> exit 0, leave it alone
 #   the owner was born anywhere else (an SSH remote attach, a shell over
 #   ssh/mosh, or a birth it cannot prove) -> `herdr server stop`, wait until the
 #                                          socket is released, then exec
@@ -29,9 +25,12 @@
 #                                          so the socket is rebound before a
 #                                          reconnecting SSH attach can start
 #                                          another foreign server
-#   the foreign server does not release the socket in time -> exit 1
+#   the server does not release the socket in time -> exit 1
 # A takeover closes every pane in that session; the parent firstmate's
 # secondmate liveness sweep relaunches its mates into the Aqua-born server.
+# Replacing an Aqua-born server that lacks detached_server_daemon:true is the
+# operator's deliberate fm-remote-doctor.sh --replace-server step, never this
+# guard's.
 # bin/fm-remote-herdr-owner-lib.sh owns the owner discovery and the birth
 # markers; FM_REMOTE_HERDR_GUARD_STOP_WAIT_TENTHS (default 50) bounds the
 # release wait in tenths of a second. Every decision prints one line to
@@ -104,5 +103,5 @@ while [ "$i" -lt "$STOP_WAIT_TENTHS" ]; do
   sleep 0.1
   i=$((i + 1))
 done
-log "the foreign server for session $SESSION did not release its socket within $STOP_WAIT_TENTHS tenths of a second; exiting 1 so launchd retries"
+log "the server for session $SESSION did not release its socket within $STOP_WAIT_TENTHS tenths of a second; exiting 1 so launchd retries"
 exit 1

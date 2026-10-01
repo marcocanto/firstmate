@@ -2,7 +2,7 @@
 # Check, and optionally repair, one remote account's second-mate readiness.
 #
 # Usage:
-#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix] [--harness omp]
+#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix|--replace-server] [--harness omp]
 #
 # Run it through fm-on.sh so the fixed entrypoint invokes this readiness owner
 # over its plain SSH bootstrap. The command reports the same filesystem-composed
@@ -13,16 +13,16 @@
 # fm-remote session. Its account therefore needs the Firstmate-owned Aqua Herdr
 # agent plus the sibling dev.firstmate.remote-job worker that runs normal fm-on
 # commands through the Aqua or Linux job-worker path. On darwin, that Herdr
-# agent runs bin/fm-remote-herdr-guard.sh through the remote account's login
-# shell (`-l -c`) so the server inherits the account's own environment; the
-# gui/<uid> launchd domain it is bootstrapped into, not the shell, is what
-# gives the server and its panes the Aqua audit session and login-keychain
-# access. The guard execs the server in the foreground under launchd, leaves an
-# Aqua-born server alone, and takes the session over from a server born
-# outside that session (an SSH remote attach wins the socket at boot), because
-# such a server's panes cannot read the login keychain;
-# bin/fm-remote-herdr-owner-lib.sh owns that birth test. Doctor remains
-# invokable over the plain-SSH bootstrap path to inspect and repair that worker.
+# agent runs bin/fm-remote-herdr-launch.sh through the remote account's login
+# shell (`-l -c`) so the server inherits the account's environment. The
+# gui/<uid> domain supplies the Aqua audit session and login-keychain access.
+# The launcher uses Perl POSIX to detach the Unix session with the same PID,
+# then execs the guard, which execs Herdr under launchd. The guard leaves an
+# Aqua-born server alone and takes over every other owner.
+# bin/fm-remote-herdr-owner-lib.sh owns the birth test. Second-mate readiness
+# needs only Aqua birth on darwin. The detached_server_daemon capability that
+# Herdr saved machines need is the separate, non-blocking saved-machine check.
+# Doctor remains invokable over the plain-SSH bootstrap path to repair the worker.
 # SSH cannot create an Aqua session, so a host with no GUI login is a human
 # gap rather than something --fix attempts to bypass.
 #
@@ -37,23 +37,26 @@
 # harness-agnostic.
 #
 # Line protocol, one fact per line, stable for script consumers:
-#   mode=check|fix
+#   mode=check|fix|replace-server
 #   path=<the child PATH this command inherited>
 #   entrypoint=yes|no
 #   platform=darwin|linux|<uname -s>|unknown
 #   required <tool>=<path>|MISSING
 #   optional <tool>=<path>|absent
-#   fix <check>=applied: <what changed>       (--fix only)
-#   fix <check>=failed: <why the repair did not land>   (--fix only)
+#   fix <check>=applied: <what changed>       (--fix or --replace-server only)
+#   fix <check>=failed: <why the repair did not land>   (--fix or --replace-server only)
 #   check <check>=ok: <evidence>
 #   check <check>=skip: <why this host is exempt>
 #   check <check>=fixable: <gap --fix can close>
+#   check <check>=advisory: <non-blocking gap outside second-mate readiness>
 #   check <check>=human: <gap only a person at that machine can close>
 #   action: <check>: <the exact step to take>
+#   advice: <check>: <the optional step for an advisory check>
 # Every check line is authoritative for the moment it printed: under --fix it is
 # the state after the repair attempt, so a human gap is never presented as
 # fixed. Any remaining fixable or human gap, and any missing required tool,
-# exits non-zero.
+# exits non-zero. An advisory gap prints its advice line but never fails the
+# run. A --replace-server attempt that does not complete also exits non-zero.
 #
 # --fix is idempotent and closes only automatable gaps: it writes and reloads
 # both Firstmate-owned Aqua agents, starts the Linux workers where no Aqua agent
@@ -61,7 +64,17 @@
 # wrapper for a required tool it can discover under nvm, asdf, or mise. It never
 # installs packages, creates a login session, writes an auto-login password,
 # changes FileVault, stores an account password, or replaces a non-Firstmate
-# wrapper; those remain reported gaps.
+# wrapper; those remain reported gaps. It never replaces a running Aqua-born
+# server for the saved-machine capability, and never rewrites or reloads an
+# agent whose only drift is the previous start target while that server runs.
+#
+# --replace-server is the deliberate operator step for those advisories on
+# darwin: it stops the Aqua-born fm-remote server that lacks
+# detached_server_daemon=true or runs under the previous start target, rewrites
+# such an agent, and restarts the launch agent. That closes every pane in the
+# session, so the second mates must be relaunched. It runs only when the host is otherwise ready
+# and makes one attempt; a capability still missing afterwards is a human gap.
+# Automatic readiness callers never pass it.
 set -eu
 
 # Resolve this script's directory with builtins only: a host missing a required
@@ -101,6 +114,10 @@ while [ "$#" -gt 0 ]; do
       [ "$MODE" = check ] || usage
       MODE=fix
       ;;
+    --replace-server)
+      [ "$MODE" = check ] || usage
+      MODE=replace-server
+      ;;
     --worker-tool-probe)
       [ "${FM_REMOTE_JOB_ACTIVE:-}" = 1 ] || { printf 'error: worker tool probe requires the remote job worker\n' >&2; exit 64; }
       [ "$MODE" = check ] || usage
@@ -120,6 +137,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 PLATFORM=$(fm_remote_job_platform)
+[ "$PLATFORM" != darwin ] || REQUIRED_TOOLS+=(perl)
 UID_NUM=$(id -u 2>/dev/null) || UID_NUM=
 
 CHECK_NAMES=()
@@ -192,6 +210,10 @@ herdr_server_running() {
   local running
   running=$(herdr_server_status_json | jq -r '.server.running // false' 2>/dev/null) || return 1
   [ "$running" = true ]
+}
+
+herdr_server_detached() {
+  herdr_server_status_json | jq -e '.server.capabilities.detached_server_daemon == true' >/dev/null 2>&1
 }
 
 # Birth of the process serving the session, as the guard classifies it:
@@ -273,28 +295,29 @@ resolve_launch_agent_shell() {
   printf '%s' /bin/sh
 }
 
-# Login-shell command that execs the Firstmate-owned guard, which in turn execs
-# the resolved herdr so launchd keeps one foreground process in the Aqua
-# session, or exits 0 when an Aqua-born server already owns the session.
-# KeepAlive={SuccessfulExit=false} is load-bearing for that exit: an
-# unconditional KeepAlive would respawn the job every throttle interval
-# forever while a foreign server holds the socket, exactly the loop this guard
-# replaces, and would never let the guard's "nothing to do" verdict rest.
-launch_agent_guard_path() {
+# The login shell execs the same-PID launcher, then the guard, then Herdr.
+# KeepAlive={SuccessfulExit=false} retries crashes and launch failures, but
+# lets the guard's successful "nothing to do" exit rest until the next login.
+launch_agent_start_path() {
+  printf '%s/bin/fm-remote-herdr-launch.sh' "$FM_ROOT"
+}
+
+# The start target an agent written before the same-PID launcher still runs.
+launch_agent_previous_start_path() {
   printf '%s/bin/fm-remote-herdr-guard.sh' "$FM_ROOT"
 }
 
-launch_agent_exec_command() { # <resolved-herdr-path>
+launch_agent_exec_command() { # <resolved-herdr-path> [start-path]
   printf 'exec %s %s %s' \
-    "$(launch_agent_shell_quote "$(launch_agent_guard_path)")" \
+    "$(launch_agent_shell_quote "${2:-$(launch_agent_start_path)}")" \
     "$(launch_agent_shell_quote "$1")" \
     "$(launch_agent_shell_quote "$HERDR_SESSION_NAME")"
 }
 
-render_launch_agent() { # <resolved-herdr-path> <resolved-login-shell>
+render_launch_agent() { # <resolved-herdr-path> <resolved-login-shell> [start-path]
   local herdr_bin=$1 shell=$2 exec_cmd shell_xml
   shell_xml=$(launch_agent_xml_escape "$shell")
-  exec_cmd=$(launch_agent_exec_command "$herdr_bin")
+  exec_cmd=$(launch_agent_exec_command "$herdr_bin" "${3:-}")
   cat <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -329,21 +352,21 @@ render_launch_agent() { # <resolved-herdr-path> <resolved-login-shell>
 XML
 }
 
-launch_agent_contract_matches() { # <resolved-login-shell>
-  local shell=$1 herdr_bin actual expected
+launch_agent_contract_matches() { # <resolved-login-shell> [start-path]
+  local shell=$1 start=${2:-} herdr_bin actual expected
   [ -f "$LAUNCH_AGENT_PLIST" ] && [ ! -L "$LAUNCH_AGENT_PLIST" ] || return 1
   herdr_bin=$(command -v herdr 2>/dev/null) || return 1
   actual=$(tr -d ' \t\r\n' < "$LAUNCH_AGENT_PLIST" 2>/dev/null) || return 1
-  expected=$(render_launch_agent "$herdr_bin" "$shell" | tr -d ' \t\r\n') || return 1
+  expected=$(render_launch_agent "$herdr_bin" "$shell" "$start" | tr -d ' \t\r\n') || return 1
   [ "$actual" = "$expected" ]
 }
 
-launch_agent_loaded_contract_matches() { # <resolved-login-shell>
-  local shell=$1 loaded herdr_bin exec_compact shell_compact plist_compact log_compact args
+launch_agent_loaded_contract_matches() { # <resolved-login-shell> [start-path]
+  local shell=$1 start=${2:-} loaded herdr_bin exec_compact shell_compact plist_compact log_compact args
   herdr_bin=$(command -v herdr 2>/dev/null) || return 1
   loaded=$(launchctl print "gui/$UID_NUM/$LAUNCH_AGENT_LABEL" 2>/dev/null) || return 1
   loaded=$(printf '%s' "$loaded" | tr -d ' \t\r\n') || return 1
-  exec_compact=$(launch_agent_exec_command "$herdr_bin" | tr -d ' \t\r\n') || return 1
+  exec_compact=$(launch_agent_exec_command "$herdr_bin" "$start" | tr -d ' \t\r\n') || return 1
   shell_compact=$(printf '%s' "$shell" | tr -d ' \t\r\n') || return 1
   plist_compact=$(printf '%s' "$LAUNCH_AGENT_PLIST" | tr -d ' \t\r\n') || return 1
   log_compact=$(printf '%s' "$LAUNCH_AGENT_LOG" | tr -d ' \t\r\n') || return 1
@@ -647,6 +670,18 @@ check_gui_session() {
     "log that account in once at the console, and enable automatic login in System Settings > Users & Groups if the machine runs headless; SSH cannot create a GUI session, and Firstmate never writes an auto-login password or changes FileVault"
 }
 
+# An upgrade changes only the start target. While an Aqua-born server owns the
+# session, that drift is advisory so no automatic pass reloads the agent and
+# closes its panes; --replace-server moves it to the current target.
+launch_agent_previous_start_kept() { # <resolved-login-shell> <contract-matcher>
+  "$2" "$1" "$(launch_agent_previous_start_path)" && herdr_server_aqua_owned
+}
+
+launch_agent_upgrade_advice() {
+  printf 'rerun this command with --replace-server to start %s; it closes every pane in session %s, so relaunch the second mates afterward' \
+    "$(launch_agent_start_path)" "$HERDR_SESSION_NAME"
+}
+
 check_launch_agent() { # <resolved-login-shell>
   local shell=$1
   if [ "$PLATFORM" != darwin ]; then
@@ -658,6 +693,9 @@ check_launch_agent() { # <resolved-login-shell>
   if [ -f "$LAUNCH_AGENT_PLIST" ] && [ ! -L "$LAUNCH_AGENT_PLIST" ]; then
     if launch_agent_contract_matches "$shell"; then
       record launchagent "ok: $LAUNCH_AGENT_PLIST matches the Firstmate-owned contract"
+    elif launch_agent_previous_start_kept "$shell" launch_agent_contract_matches; then
+      record launchagent "advisory: $LAUNCH_AGENT_PLIST still starts $(launch_agent_previous_start_path), and the Aqua-born server it started keeps running" \
+        "$(launch_agent_upgrade_advice)"
     else
       record launchagent "fixable: $LAUNCH_AGENT_PLIST does not match the current Firstmate-owned contract" \
         "rerun this command with --fix to rewrite its label, program arguments, session scope, restart policy, and log paths"
@@ -686,6 +724,9 @@ check_launch_agent_loaded() { # <resolved-login-shell>
   if launchctl print "gui/$UID_NUM/$LAUNCH_AGENT_LABEL" >/dev/null 2>&1; then
     if launch_agent_loaded_contract_matches "$shell"; then
       record launchagent-loaded "ok: gui/$UID_NUM/$LAUNCH_AGENT_LABEL matches the effective contract"
+    elif launch_agent_previous_start_kept "$shell" launch_agent_loaded_contract_matches; then
+      record launchagent-loaded "advisory: gui/$UID_NUM/$LAUNCH_AGENT_LABEL still starts $(launch_agent_previous_start_path), and the Aqua-born server it started keeps running" \
+        "$(launch_agent_upgrade_advice)"
     else
       record launchagent-loaded "fixable: gui/$UID_NUM/$LAUNCH_AGENT_LABEL does not match the effective Firstmate-owned contract" \
         "rerun this command with --fix to replace the loaded job with the current launch-agent contract"
@@ -742,6 +783,21 @@ check_herdr_server() {
     "rerun this command with --fix to start it"
 }
 
+# Saved Herdr machines need a detached server daemon; second mates do not, so
+# a missing capability is advisory until a deliberate --replace-server attempt.
+check_saved_machine() {
+  [ "$PLATFORM" = darwin ] && check_is_ok herdr-server || return 0
+  if herdr_server_detached; then
+    record saved-machine "ok: session $HERDR_SESSION_NAME reports detached_server_daemon=true, so the host can be saved as a Herdr machine"
+  elif [ "$SERVER_REPLACED" -eq 1 ]; then
+    record saved-machine "human: session $HERDR_SESSION_NAME still lacks detached_server_daemon=true after its deliberate replacement, so the host cannot be saved as a Herdr machine" \
+      "check the herdr version on that host and $LAUNCH_AGENT_LOG; --replace-server is not retried automatically, and the second mates must be relaunched"
+  else
+    record saved-machine "advisory: session $HERDR_SESSION_NAME lacks detached_server_daemon=true, so the host cannot be saved as a Herdr machine; second mates are unaffected" \
+      "to save the host as a Herdr machine, rerun this command with --replace-server; it closes every pane in session $HERDR_SESSION_NAME, so relaunch the second mates afterward"
+  fi
+}
+
 check_entrypoint_link() {
   local want
   if [ -z "${FM_ROOT_OVERRIDE:-}" ]; then
@@ -772,6 +828,7 @@ run_checks() { # <resolved-login-shell>
   check_remote_job_worker
   check_launch_agent "$shell"
   check_herdr_server
+  check_saved_machine
   check_entrypoint_link
   check_omp
 }
@@ -807,7 +864,7 @@ write_launch_agent() { # <resolved-login-shell>
     fix_report launchagent failed "cannot publish $LAUNCH_AGENT_PLIST"
     return 1
   fi
-  fix_report launchagent applied "wrote the Aqua-scoped $LAUNCH_AGENT_LABEL launch agent running $(launch_agent_guard_path) for $herdr_bin via $shell -l -c"
+  fix_report launchagent applied "wrote the Aqua-scoped $LAUNCH_AGENT_LABEL launch agent running $(launch_agent_start_path) for $herdr_bin via $shell -l -c"
 }
 
 # Reload rather than plain bootstrap so a rewritten plist replaces a stale
@@ -860,6 +917,47 @@ start_herdr_server() {
   fi
   fix_report herdr-server failed "the herdr server for session $HERDR_SESSION_NAME did not come up"
   return 1
+}
+
+# One deliberate replacement of an Aqua-born server that lacks the detached
+# capability: stop it, wait for the socket to clear, then restart the agent.
+replace_herdr_server() { # <resolved-login-shell>
+  local shell=$1 i=0 previous=0
+  case "$(check_value launchagent 2>/dev/null || true) $(check_value launchagent-loaded 2>/dev/null || true)" in
+    *advisory:*) previous=1 ;;
+  esac
+  case "$(check_value saved-machine 2>/dev/null || true)" in
+    ok:*) [ "$previous" -eq 1 ] || return 0 ;;
+    advisory:*) ;;
+    *)
+      fix_report saved-machine failed "session $HERDR_SESSION_NAME is not ready for second mates on a darwin Aqua launch agent; close the gaps above with --fix first"
+      return 1
+      ;;
+  esac
+  case "$(check_value launchagent 2>/dev/null || true) $(check_value launchagent-loaded 2>/dev/null || true)" in
+    ok:*\ ok:*|ok:*\ advisory:*|advisory:*\ ok:*|advisory:*\ advisory:*) ;;
+    *)
+      fix_report saved-machine failed "$LAUNCH_AGENT_LABEL does not match the loaded Firstmate-owned contract; close that gap with --fix first"
+      return 1
+      ;;
+  esac
+  if [ "$previous" -eq 1 ]; then
+    write_launch_agent "$shell" || return 1
+  fi
+  if ! fm_backend_herdr_cli "$HERDR_SESSION_NAME" server stop >/dev/null 2>&1; then
+    fix_report saved-machine failed "herdr server stop for session $HERDR_SESSION_NAME did not succeed"
+    return 1
+  fi
+  SERVER_REPLACED=1
+  while herdr_server_running; do
+    if [ "$i" -ge 20 ]; then
+      fix_report saved-machine failed "the herdr server for session $HERDR_SESSION_NAME did not stop within 10s"
+      return 1
+    fi
+    i=$((i + 1))
+    sleep 0.5
+  done
+  reload_launch_agent saved-machine
 }
 
 link_entrypoint() {
@@ -941,6 +1039,8 @@ else
 fi
 printf 'platform=%s\n' "$PLATFORM"
 
+SERVER_REPLACED=0
+REPLACE_FAILED=0
 LAUNCH_AGENT_SHELL=
 if [ "$PLATFORM" = darwin ]; then
   LAUNCH_AGENT_SHELL=$(resolve_launch_agent_shell)
@@ -950,6 +1050,9 @@ if [ "$MODE" = fix ]; then
   apply_fixes "$LAUNCH_AGENT_SHELL"
   # Re-derive every check from the host itself, so what prints below is the
   # state after repair rather than the intent of a repair.
+  run_checks "$LAUNCH_AGENT_SHELL"
+elif [ "$MODE" = replace-server ]; then
+  replace_herdr_server "$LAUNCH_AGENT_SHELL" || REPLACE_FAILED=1
   run_checks "$LAUNCH_AGENT_SHELL"
 fi
 
@@ -967,16 +1070,21 @@ for tool in "${OPTIONAL_TOOLS[@]}"; do
 done
 
 GAPS=()
+ADVISORIES=()
 i=0
 while [ "$i" -lt "${#CHECK_NAMES[@]}" ]; do
   printf 'check %s=%s\n' "${CHECK_NAMES[$i]}" "${CHECK_VALUES[$i]}"
   case "${CHECK_VALUES[$i]}" in
     fixable:*|human:*) GAPS+=("$i") ;;
+    advisory:*) ADVISORIES+=("$i") ;;
   esac
   i=$((i + 1))
 done
 for i in ${GAPS[@]+"${GAPS[@]}"}; do
   [ -z "${CHECK_ACTIONS[$i]}" ] || printf 'action: %s: %s\n' "${CHECK_NAMES[$i]}" "${CHECK_ACTIONS[$i]}"
+done
+for i in ${ADVISORIES[@]+"${ADVISORIES[@]}"}; do
+  [ -z "${CHECK_ACTIONS[$i]}" ] || printf 'advice: %s: %s\n' "${CHECK_NAMES[$i]}" "${CHECK_ACTIONS[$i]}"
 done
 
 if [ "${#MISSING[@]}" -gt 0 ]; then
@@ -990,6 +1098,10 @@ if [ "${#MISSING[@]}" -gt 0 ] || [ "${#GAPS[@]}" -gt 0 ]; then
     NAMES="${NAMES:+$NAMES }${CHECK_NAMES[$i]}"
   done
   printf 'error: this host is not ready for a remote second mate%s\n' "${NAMES:+; unresolved: $NAMES}" >&2
+  exit 1
+fi
+if [ "$REPLACE_FAILED" -eq 1 ]; then
+  printf 'error: --replace-server did not replace the herdr server for session %s; see the fix saved-machine line above\n' "$HERDR_SESSION_NAME" >&2
   exit 1
 fi
 printf 'ok: remote second-mate readiness confirmed on this host\n'

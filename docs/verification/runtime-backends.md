@@ -1101,16 +1101,37 @@ The SSH-born row was read on the remote host whose `dev.firstmate.herdr.fm-remot
 `pgrep -f` did not list the herdr server's argv on macOS; `lsof -U -a -c herdr -F pn` named the socket owner.
 
 A separate foreground-supervision check ran on 2026-09-09 on macOS 26 (Darwin 25.6.0) with Herdr 0.9.0 using the throwaway Aqua launch agent `dev.fm-rca.herdr-fg`.
-Its `ProgramArguments` ran `/run/current-system/sw/bin/zsh -l -c "exec /etc/profiles/per-user/kunchen/bin/herdr server --session fm-lab-fg-90381-18985"`, with `KeepAlive={SuccessfulExit=false}` and `ThrottleInterval=10`, after `launchctl bootstrap gui/501 <plist>` and `launchctl kickstart -k gui/501/dev.fm-rca.herdr-fg`.
+The account-specific executable path below uses the generic stand-in `<herdr-path>`.
+Its `ProgramArguments` ran `/run/current-system/sw/bin/zsh -l -c "exec <herdr-path> server --session fm-lab-fg-90381-18985"`, with `KeepAlive={SuccessfulExit=false}` and `ThrottleInterval=10`, after `launchctl bootstrap gui/501 <plist>` and `launchctl kickstart -k gui/501/dev.fm-rca.herdr-fg`.
 `launchctl print gui/501/dev.fm-rca.herdr-fg` reported `state = running` and `pid = 4806`.
 `lsof -U -a -c herdr -F pn` named pid 4806 as the owner of `~/.config/herdr/sessions/fm-lab-fg-90381-18985/herdr.sock`.
-`ps -o pid,ppid,command -p 4806` reported `4806 1 /etc/profiles/per-user/kunchen/bin/herdr server --session fm-lab-fg-90381-18985`, and its environment carried `XPC_SERVICE_NAME=dev.fm-rca.herdr-fg`.
+`ps -o pid,ppid,command -p 4806` reported `4806 1 <herdr-path> server --session fm-lab-fg-90381-18985`, and its environment carried `XPC_SERVICE_NAME=dev.fm-rca.herdr-fg`.
 No other herdr process existed for that session, and after 15 seconds the job remained running with pid 4806.
 After a guarded `herdr session stop`, the job reported `state = not running` and `last exit code = 0`, and it stayed at rest through the throttle interval.
 A second `launchctl kickstart -k gui/501/dev.fm-rca.herdr-fg` started pid 45574, which was also the new socket owner.
-This proves that `herdr server` remains in the foreground as the launchd job, so the guard's final `exec` supplies the intended supervision and the earlier server that survived `launchctl bootout` was the unrelated SSH-bridge-born process.
+This proves that Herdr 0.9.0 remains in the foreground as the launchd job and that a successful stop lets the job rest.
+It does not verify the same-PID Unix-session detachment now used by `bin/fm-remote-herdr-launch.sh`.
 
-`bin/fm-test-run.sh tests/fm-remote-herdr-guard.test.sh` pins the resulting decision table against real marker-carrying processes, and `tests/fm-remote-doctor.test.sh` pins the doctor's verdicts on the same markers.
+`tests/fm-remote-herdr-guard.test.sh` and `tests/fm-remote-doctor.test.sh` cover Aqua birth as the readiness condition and the boolean detached capability as the separate saved-machine check, which only the deliberate `--replace-server` step acts on.
+
+On 2026-09-30, the real launcher and guard executed a process observer instead of Herdr on Darwin 25.6.0 arm64 with Perl 5.34.1 and Python 3.14.4:
+
+```sh
+bash bin/fm-test-run.sh tests/fm-remote-herdr-launch.test.sh
+```
+
+```text
+ok - inherited group becomes a same-PID session leader and preserves launch context and exit codes
+ok - leader group becomes a same-PID session leader and preserves launch context and exit codes
+ok - a server crash reaches the original supervised PID
+ok - a failed process-group join stops before any server starts
+FM_TEST_SUMMARY total=1 failed=0 skipped_gate=0 duration_ms=1249
+```
+
+That test checks the inherited and process-group-leader cases, a neutral environment marker, stdin/stdout/stderr, successful and nonzero exits, and a SIGKILL crash.
+It rejects a failed process-group join before the guard runs.
+It does not establish a genuine launchd `XPC_SERVICE_NAME`, an Aqua audit session, login-keychain access, launchd restart behavior, or real Herdr saved-machine readiness.
+Refresh those facts with a guarded non-default local LaunchAgent experiment before treating the new launcher as verified.
 
 ### Client selection
 

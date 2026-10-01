@@ -4,7 +4,7 @@
 #
 # Source this file; it defines functions only. It is the single owner of the
 # socket-owner discovery and birth classification shared by
-# bin/fm-remote-herdr-guard.sh (the launch agent's exec target) and
+# bin/fm-remote-herdr-guard.sh (after the launcher's same-PID detachment) and
 # bin/fm-remote-doctor.sh (the readiness check for that session).
 #
 # Why birth matters: a herdr server, and every pane and agent it later spawns,

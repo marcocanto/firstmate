@@ -51,6 +51,7 @@ Select Herdr in any of these ways:
 - An explicit request to Firstmate.
 
 A remote second-mate agent is the one case with no choice: it always runs on Herdr, and [`remote-secondmates.md`](remote-secondmates.md) owns that requirement and the readiness its host must meet.
+On macOS, that host needs an Aqua-born server under launchd, and a saved Herdr machine also needs that server to be a detached daemon; [remote-secondmate setup](remote-secondmates.md#how-the-herdr-launch-agent-starts-its-server) owns its start mode and [saved-machine setup](remote-secondmates.md#add-the-host-to-the-herdr-sidebar) owns the sidebar step.
 
 Herdr is also auto-detected when the primary runs natively under `HERDR_ENV=1` and is not inside tmux.
 A tmux pane nested inside Herdr resolves to tmux because the innermost multiplexer wins.
@@ -819,7 +820,11 @@ The helper:
 - Performs destructive stop/delete only through its guarded lifecycle actions.
 
 Immediately before every destructive call it re-queries the named session and refuses empty, missing, literal `default`, or `default:true` identities.
-Its before/after tripwire requires the live default-session snapshot to remain byte-identical.
+Its before/after tripwire protects every pre-existing session, including stopped sessions; the helper's header owns the recorded identity fields and mismatch policy.
+The live fleet may use a named session while `default` is stopped.
+For a foreground server that must keep its supervisor's tracked PID, the helper also supports a prepared same-PID start.
+The foreground action checks the protected inventory and lab state from one snapshot before it execs the server.
+The helper's header owns its ownership and inventory checks; the parent supervisor must retain the combined cleanup trap.
 
 The helper's header and `--help` own exact commands.
 Tests use thin compatibility wrappers in `tests/herdr-test-safety.sh` and never duplicate the destructive policy.
@@ -855,5 +860,5 @@ tests/fm-afk-inject-herdr-e2e.test.sh
 tests/fm-afk-pi-herdr-return-e2e.test.sh
 ```
 
-Real Herdr tests use the named lab helper and default-session tripwire.
+Real Herdr tests use the named lab helper and its pre-existing-session inventory tripwire.
 [`verification/runtime-backends.md`](verification/runtime-backends.md#herdr) records the active version, CLI, projection, event, and lifecycle evidence without task-specific chronology.
