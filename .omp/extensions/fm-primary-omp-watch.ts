@@ -104,8 +104,8 @@
 // same way without the restore, stranding the wake in omp's queue. On a plain
 // agent_end (never willContinue) this file re-checks every
 // FM_OMP_INTERRUPT_SETTLE_MS until omp reads idle, for at most 60 s so a slow
-// session_stop turn-end guard is outlasted, then, with any wake still
-// unconsumed, including one sent during the settle:
+// session_stop turn-end guard is outlasted, then, with any wake or failure
+// notice still unconsumed, including one sent during the settle:
 //   1. idle, nothing queued, and the editor holds an unconsumed wake's exact
 //      text: exactly that text leaves the editor, every other character (a
 //      captain's queued message or draft) stays byte for byte, and the token
@@ -114,9 +114,12 @@
 //   2. idle, messages still queued, and no unconsumed wake in the editor: one
 //      operational steer, never a second copy of a wake, starts a turn; a
 //      queued steer clears the suppression or passes the advisor's note, and
-//      omp delivers the stranded wakes after it. Each stranded wake earns at
-//      most one steer omp accepts; a rejected steer lets a later agent_end
-//      try again.
+//      omp delivers the stranded wakes after it. Each stranded wake or failure
+//      notice earns at most one steer omp accepts; a rejected steer lets a
+//      later agent_end try again.
+// A failure notice (surfaceFailure) has no pending record and never rides the
+// replacement handoff; a follow-up one is tracked until omp consumes it only
+// so step 2 steers for it.
 // Each agent_end is checked once, and only the latest one pending settle acts;
 // a later agent_end or a replaced generation ends an earlier check.
 // A blind Enter from the parent is never safe here because the restored text
@@ -207,8 +210,11 @@ type SessionGeneration = {
   // still delivering the wake it was started for; its bounded retry runs once
   // that delivery settles instead of being skipped by the single-flight guard.
   deferredClose: { message: string; predecessorArmPid: string } | null;
-  // Unconsumed wake tokens that already earned one continuation steer after an
-  // empty-Enter abort stranded them in omp's queue.
+  // Failure notices omp accepted as follow-ups but has not consumed, content
+  // by token; only the interrupted-run recovery steer reads them.
+  unconsumedNotices: Map<string, string>;
+  // Unconsumed wake and notice tokens that already earned one continuation
+  // steer after the run that stranded them in omp's queue settled.
   steeredWakes: Set<string>;
   // Bumped on every plain agent_end so only the latest settle check acts.
   interruptCheck: number;
@@ -624,6 +630,7 @@ function createGeneration(): SessionGeneration {
     pendingActionables: [],
     cleanupFailure: "",
     unconsumedWakes: new Map(),
+    unconsumedNotices: new Map(),
     deferredClose: null,
     steeredWakes: new Set(),
     interruptCheck: 0,
@@ -718,12 +725,16 @@ export default function (pi: ExtensionAPI) {
       "watcher",
       `FIRSTMATE WATCHER WAKE: ${message}\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.`,
     );
+    const idle = latestContext?.isIdle?.() === true;
+    // A send with no pending record is a failure notice.
+    const notice = !pending && !idle ? `notice-${++replacementCoordinator.nextTokenId}` : "";
     if (pending) owner.unconsumedWakes.set(pending.token, { content, pending, acceptedAt: Date.now() });
+    if (notice) owner.unconsumedNotices.set(notice, content);
     try {
-      const idle = latestContext?.isIdle?.() === true;
       await pi.sendUserMessage(content, idle ? undefined : { deliverAs: "followUp" });
     } catch (error) {
       if (pending) owner.unconsumedWakes.delete(pending.token);
+      if (notice) owner.unconsumedNotices.delete(notice);
       throw error;
     }
     // Accepted by omp (sendUserMessage returns synchronously there; awaiting a
@@ -750,6 +761,12 @@ export default function (pi: ExtensionAPI) {
       }
       return;
     }
+    for (const [token, content] of owner.unconsumedNotices) {
+      if (content !== text) continue;
+      owner.unconsumedNotices.delete(token);
+      owner.steeredWakes.delete(token);
+      return;
+    }
   }
 
   // The interrupted-run recovery stated in this file's header, run once per
@@ -767,7 +784,7 @@ export default function (pi: ExtensionAPI) {
       });
       if (!generationIsLive(owner) || owner.interruptCheck !== check) return;
     } while (ctx.isIdle() !== true && Date.now() < deadline);
-    if (ctx.isIdle() !== true || owner.unconsumedWakes.size === 0) return;
+    if (ctx.isIdle() !== true || owner.unconsumedWakes.size + owner.unconsumedNotices.size === 0) return;
     const editor: unknown = ctx.ui?.getEditorText?.();
     if (typeof editor !== "string") return;
     const queued = ctx.hasPendingMessages?.() === true;
@@ -792,7 +809,8 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     if (!queued) return;
-    const stranded = [...owner.unconsumedWakes.keys()].filter((token) => !owner.steeredWakes.has(token));
+    const stranded = [...owner.unconsumedWakes.keys(), ...owner.unconsumedNotices.keys()]
+      .filter((token) => !owner.steeredWakes.has(token));
     if (stranded.length === 0) return;
     for (const token of stranded) owner.steeredWakes.add(token);
     const steer = encodeFirstmateOperationalInput(

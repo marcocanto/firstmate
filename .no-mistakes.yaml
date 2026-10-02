@@ -45,7 +45,10 @@ test:
     Do not mutate the operator primary checkout, real fleet FM_HOME state, or production credentials (never sign in, sign out, re-login, or edit credential stores), and keep git changes otherwise inside the run worktree. A captain-opted-in live check may use the machine's normal Claude login; Claude's own session and transcript files under the home directory are expected and are not credential mutations. An empty isolated CLAUDE_CONFIG_DIR is not evidence that the normal login is unavailable.
     Read docs/herdr-backend.md and the bin/fm-herdr-lab.sh header as the owners of Herdr lab mechanics rather than reproducing that manual here.
     Ship or scout briefs that will drive Herdr lifecycle still require --herdr-lab at scaffold time; these Test-agent instructions are not a substitute for that brief flag.
-    The PR body publishes your testing_summary, scenarios, findings, artifact labels and captions, and the text of every evidence file you list. Keep all of them free of private project, repository, issue, PR, feature, and second mate names, home and worktree paths, hostnames, SSH aliases, IP addresses, and usernames; use generic stand-ins.
+    The PR body publishes your testing_summary, scenarios, findings, and each artifact's label and content, and it can publish an artifact's path.
+    Never set an artifact path, not even for a file in the evidence directory, because the recorded path is an absolute path under the home directory and cannot be cleaned after Test; this overrides the general guidance to record evidence file paths.
+    Put a short text excerpt of the evidence in the artifact content instead, and describe screenshots or other binary evidence in testing_summary.
+    Keep all of them free of private project, repository, issue, PR, feature, and second mate names, home and worktree paths, hostnames, SSH aliases, IP addresses, and usernames; use generic stand-ins.
   # Both settings are read from the pushed branch, so they hold for that branch's own run.
   # store_in_repo would copy the evidence directory verbatim onto the public evidence branch.
   # attach_media would upload images and videos to GitHub user-attachments at PR render time.
