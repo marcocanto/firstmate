@@ -35,7 +35,8 @@
 #      unsent: a wake an Escape restored into the editor leaves the editor
 #      exactly and is delivered again once, and wakes an empty Enter stranded
 #      in omp's queue earn one distinct steer, tried again after a later
-#      settled run if omp rejects it. A fake host cannot reproduce
+#      settled run if omp rejects it; a failure notice queued while omp
+#      settles earns the same steer. A fake host cannot reproduce
 #      omp's queue, restore, or advisor, so only this policy is pinned here;
 #      FM_OMP_INTERRUPT_LIVE_E2E=1 tests/fm-omp-interrupt-live-e2e.test.sh
 #      re-checks the omp behavior it assumes.
@@ -974,6 +975,133 @@ EOF
   pass ".omp watch extension: each wake to an idle main starts a turn even after an advisor note, a mid-run wake waits for the run, and a wake queued while omp settles still starts a turn"
 }
 
+# A failure notice (retry exhaustion or a lost session lock) carries no pending
+# record. When one fires while omp settles a natural agent_end, omp reads not
+# idle, so the notice goes out as a follow-up and can sit queued behind the
+# advisor note once omp settles. It must still start a turn through one steer,
+# exactly as an ordinary wake queued during the settle does.
+test_watch_extension_starts_a_turn_for_a_settling_failure_notice() {  # <retry-exhausted|lock-lost>
+  local kind=$1 repo home out status
+  repo="$TMP_ROOT/watch-notice-$kind/repo"; home="$TMP_ROOT/watch-notice-$kind/home"
+  install_omp_extension_fixture "$repo"
+  mkdir -p "$home/state"
+  # The first cycle starts, then fails once the test creates state/.fail; every
+  # later cycle fails at once, so continuity retries run out.
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" = --handling-delivered ] && exit 0
+if [ -e "${FM_HOME:?}/state/.fail" ]; then
+  printf 'watcher: FAILED - fixture cycle could not start\n' >&2
+  exit 1
+fi
+printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-%s\n' "$$" "$$"
+: > "$FM_HOME/state/.armed"
+while [ ! -e "$FM_HOME/state/.fail" ]; do sleep 0.05; done
+printf 'watcher: FAILED - fixture cycle died\n' >&2
+exit 1
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_OMP_INTERRUPT_SETTLE_MS=100 \
+    FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    KIND="$kind" EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { writeFileSync, existsSync, unlinkSync } from "node:fs";
+const state = `${process.env.FM_HOME}/state`;
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const handlers = new Map();
+// The same fake omp delivery rules as the idle-wake test above.
+let streaming = false; let settling = false; let tail = "assistant";
+const followUps = []; const turns = []; const interruptions = []; const steers = [];
+const ctx = {
+  isIdle: () => !streaming && !settling,
+  hasPendingMessages: () => followUps.length > 0,
+  ui: { getEditorText: () => "", setEditorText: () => { throw new Error("an empty editor must not be written"); } },
+};
+const userStart = (text) => handlers.get("message_start")({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } }, ctx);
+const startRun = async (text) => {
+  streaming = true;
+  await handlers.get("before_agent_start")({ type: "before_agent_start", prompt: text }, ctx);
+  await userStart(text);
+  turns.push(text);
+};
+const endRun = async () => {
+  while (followUps.length > 0) {
+    const next = followUps.shift();
+    await userStart(next);
+    turns.push(next);
+  }
+  streaming = false; tail = "assistant";
+  await handlers.get("agent_end")({ type: "agent_end" }, ctx);
+};
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) {
+    if (o?.deliverAs === "followUp") {
+      followUps.push(m);
+      if (!streaming && !settling && (tail === "assistant" || tail === "toolResult")) {
+        setTimeout(async () => { await startRun(followUps.shift()); await endRun(); }, 5);
+      }
+    } else if (o?.deliverAs === "steer" && !streaming && !settling) {
+      steers.push(m);
+      setTimeout(async () => { await startRun(m); await endRun(); }, 5);
+    } else if (o?.deliverAs !== undefined) {
+      throw new Error(`unexpected delivery mode ${o.deliverAs}`);
+    } else if (streaming) {
+      interruptions.push(m);
+    } else {
+      setTimeout(async () => { await startRun(m); await endRun(); }, 5);
+    }
+    return undefined;
+  },
+};
+const waitFor = async (what, check) => {
+  for (let i = 0; i < 80; i += 1) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`${what}; turns ${JSON.stringify(turns)}, queued follow-ups ${JSON.stringify(followUps)}, steers ${JSON.stringify(steers)}`);
+};
+const expected = process.env.KIND === "lock-lost"
+  ? "omp extension cannot restore continuity because this session no longer owns the lock"
+  : "omp extension could not restore watcher continuity after 1 retries";
+const isNotice = (text) => text.includes(`FIRSTMATE WATCHER WAKE: watcher: FAILED - ${expected}`);
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, ctx);
+await waitFor("the first cycle never started", () => existsSync(`${state}/.armed`));
+// The run of the captain ends naturally; omp settles it and reads not idle.
+await startRun("captain: what is the fleet doing?");
+streaming = false; settling = true;
+await handlers.get("agent_end")({ type: "agent_end" }, ctx);
+if (process.env.KIND === "lock-lost") unlinkSync(`${state}/.lock`);
+writeFileSync(`${state}/.fail`, "");
+await waitFor("the failure notice was never handed to omp", () => followUps.some(isNotice) || interruptions.length > 0);
+if (interruptions.length > 0) throw new Error(`a settling failure notice was not a follow-up: ${JSON.stringify(interruptions)}`);
+await new Promise((r) => setTimeout(r, 600));
+if (steers.length !== 0 || turns.some(isNotice)) throw new Error(`nothing may start while omp still settles: ${JSON.stringify(steers)}`);
+// omp settles idle behind the advisor note with the notice still queued.
+tail = "custom"; settling = false;
+await waitFor("a failure notice queued while omp settled never started a turn", () => turns.some(isNotice) && !streaming);
+if (steers.length !== 1) throw new Error(`the settling failure notice must earn exactly one steer: ${JSON.stringify(steers)}`);
+if (isNotice(steers[0]) || steers[0].includes("FIRSTMATE WATCHER WAKE:")) throw new Error(`the steer must not copy the notice: ${steers[0]}`);
+if (turns.filter(isNotice).length !== 1) throw new Error(`the failure notice must reach main once: ${JSON.stringify(turns)}`);
+// A later settled run with something else queued earns no second steer for a consumed notice.
+followUps.push("captain: queued later");
+await handlers.get("agent_end")({ type: "agent_end" }, ctx);
+await new Promise((r) => setTimeout(r, 400));
+if (steers.length !== 1) throw new Error(`a consumed failure notice earned another steer: ${JSON.stringify(steers)}`);
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch extension settling failure notice ($kind): $out"
+  [ -z "$out" ] || fail "omp watch extension settling failure notice test ($kind) printed output: $out"
+  pass ".omp watch extension: a $kind failure notice queued while omp settles still starts a turn through one steer"
+}
+
 # An opted-in home spawns the supervision host in the arm's place; its streamed
 # status line drives readiness and the handling handoff, and a handed-back
 # wake is delivered with every host line and the away note.
@@ -1271,6 +1399,8 @@ test_watch_extension_recovers_a_wake_an_escape_restored
 test_watch_extension_steers_past_a_wake_an_empty_enter_stranded
 test_watch_extension_retries_a_rejected_steer
 test_watch_extension_starts_a_turn_for_an_idle_wake
+test_watch_extension_starts_a_turn_for_a_settling_failure_notice retry-exhausted
+test_watch_extension_starts_a_turn_for_a_settling_failure_notice lock-lost
 test_watch_extension_runs_the_supervision_host
 test_watch_extension_runs_the_supervision_host quiet
 test_watch_extension_keeps_the_arm_without_the_file_or_with_off
