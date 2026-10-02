@@ -1466,11 +1466,13 @@ EOF
   pass ".omp watch extension: a wake that closes behind another is held until that run ends and is delivered only while its row is queued"
 }
 
-# A held wake does not wait on a run end that may never come. With an earlier
-# wake that main never consumes and no agent_end at all, a wake held behind it
-# goes out once the hold bound passes; a wake held behind a consumed wake whose
-# run never reports its end does too; and a held wake whose row a drain
-# acknowledged meanwhile is dropped at that bound instead of replayed.
+# A held wake does not wait on a run end that may never come, yet its hold
+# never expires while main is still running. With an earlier wake that main
+# never consumes and no agent_end at all, a wake held behind it stays held past
+# the hold bound while main streams and goes out once main reads idle; a held
+# wake whose row a drain acknowledged meanwhile is dropped at the bound instead
+# of replayed; and a wake held by a consumed wake whose run never reports its
+# end also waits for main to read idle.
 test_watch_extension_releases_a_held_wake_after_the_hold_bound() {
   local repo home out status
   repo="$TMP_ROOT/watch-hold-bound/repo"; home="$TMP_ROOT/watch-hold-bound/home"
@@ -1486,7 +1488,8 @@ const { ackThrough } = await import(pathToFileURL(process.env.QUEUE_ACK).href);
 const state = `${process.env.FM_HOME}/state`;
 writeFileSync(`${state}/.lock`, `${process.pid}\n`);
 const handlers = new Map(); const sent = [];
-const ctx = { isIdle: () => false, hasPendingMessages: () => false };
+let idle = false;
+const ctx = { isIdle: () => idle, hasPendingMessages: () => false };
 const pi = {
   on(e, h) { handlers.set(e, h); },
   registerCommand() {},
@@ -1504,6 +1507,7 @@ const waitFor = async (what, check) => {
 const wake = (n) => sent.filter((item) => item.m.includes(`FIRSTMATE WATCHER WAKE: signal: queued wake ${n}\n`));
 const fire = (n) => writeFileSync(`${state}/.fire-${n}`, "");
 const userStart = (text) => handlers.get("message_start")({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } }, ctx);
+const endRun = () => handlers.get("agent_end")({ type: "agent_end" }, ctx);
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 const mod = await import(pathToFileURL(process.env.EXT).href);
 mod.default(pi);
@@ -1514,22 +1518,25 @@ await waitFor("wake 1 never reached omp", () => wake(1).length === 1);
 // Wake 2 closes behind it and is held; nothing else arrives and no run ends.
 fire(2);
 await waitFor("the successor of wake 2 never started", () => arms() >= 3);
-await pause(300);
-if (sent.length !== 1) throw new Error(`a wake behind an unread wake went out before the hold bound: ${JSON.stringify(sent.slice(1))}`);
-await waitFor("a held wake was never released after the hold bound", () => wake(2).length === 1);
+await pause(3500);
+if (sent.length !== 1) throw new Error(`a held wake went out while main was still running: ${JSON.stringify(sent.slice(1))}`);
+idle = true;
+await waitFor("a held wake was never released once main read idle", () => wake(2).length === 1);
 // Wake 3 is held behind wake 2, and a drain acknowledges every row before the bound.
 fire(3);
 await waitFor("the successor of wake 3 never started", () => arms() >= 4);
 ackThrough(3);
-await pause(2000);
+await pause(3500);
 if (wake(3).length !== 0) throw new Error("a held wake whose row was acknowledged was delivered at the hold bound");
 // Main consumes wake 2, and its run never reports an end; wake 4 is held by it.
+idle = false;
 await userStart(wake(2)[0].m);
 fire(4);
 await waitFor("the successor of wake 4 never started", () => arms() >= 5);
-await pause(300);
-if (wake(4).length !== 0) throw new Error("a wake that closed during the handling run went out before the hold bound");
-await waitFor("a wake held by a handling run was never released after the hold bound", () => wake(4).length === 1);
+await pause(3500);
+if (wake(4).length !== 0) throw new Error("a wake held by a running handling run went out past the hold bound");
+idle = true;
+await waitFor("a wake held by a handling run was never released once main read idle", () => wake(4).length === 1);
 await pause(300);
 if (sent.length !== 3 || wake(1).length !== 1 || wake(2).length !== 1) throw new Error(`expected wakes 1, 2, and 4 once each: ${JSON.stringify(sent)}`);
 await handlers.get("session_shutdown")({}, {});
@@ -1539,7 +1546,85 @@ EOF
   status=$?
   expect_code 0 "$status" "omp watch extension hold bound: $out"
   [ -z "$out" ] || fail "omp watch extension hold bound test printed output: $out"
-  pass ".omp watch extension: a held wake is released through the queue gate after the hold bound without a run end"
+  pass ".omp watch extension: a held wake outlives the hold bound while main runs and is released through the queue gate once main reads idle"
+}
+
+# During one long run, a wake held behind the handling run and a later wake
+# that closes more than one hold bound after it both stay out of the omp queue
+# until that run ends; then only rows still queued go out, and a row the next
+# drain acknowledged is never replayed.
+test_watch_extension_keeps_holding_through_a_long_run() {
+  local repo home out status
+  repo="$TMP_ROOT/watch-hold-long-run/repo"; home="$TMP_ROOT/watch-hold-long-run/home"
+  install_omp_extension_fixture "$repo"
+  install_queue_arm_fixture "$repo"
+  mkdir -p "$home/state"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" QUEUE_ACK="$QUEUE_ACK_MODULE" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_OMP_WAKE_HOLD_MS=1500 \
+    FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync } from "node:fs";
+const { ackThrough } = await import(pathToFileURL(process.env.QUEUE_ACK).href);
+const state = `${process.env.FM_HOME}/state`;
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const handlers = new Map(); const sent = [];
+let idle = false;
+const ctx = { isIdle: () => idle, hasPendingMessages: () => false };
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const arms = () => Number(readFileSync(`${state}/.arm-count`, "utf8"));
+const waitFor = async (what, check) => {
+  for (let i = 0; i < 80; i += 1) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`${what}; sent ${JSON.stringify(sent.map((item) => item.m.replace(/^[^:]*: v1 watcher: /, "")))}`);
+};
+const wake = (n) => sent.filter((item) => item.m.includes(`FIRSTMATE WATCHER WAKE: signal: queued wake ${n}\n`));
+const fire = (n) => writeFileSync(`${state}/.fire-${n}`, "");
+const userStart = (text) => handlers.get("message_start")({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } }, ctx);
+const endRun = () => handlers.get("agent_end")({ type: "agent_end" }, ctx);
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, ctx);
+// Main takes wake 1 and starts a long run.
+fire(1);
+await waitFor("wake 1 never reached omp", () => wake(1).length === 1);
+await userStart(wake(1)[0].m);
+ackThrough(1);
+// Wake B closes during the run and is held behind it.
+fire(2);
+await waitFor("the successor of wake B never started", () => arms() >= 3);
+await pause(2000);
+// Wake C closes more than one hold bound after B.
+fire(3);
+await waitFor("the successor of wake C never started", () => arms() >= 4);
+await pause(2000);
+if (sent.length !== 1) throw new Error(`a wake went out during the long run: ${JSON.stringify(sent.slice(1))}`);
+// The long run ends: B goes out, and C waits behind B.
+await endRun();
+await waitFor("wake B was never delivered after the run ended", () => wake(2).length === 1);
+await pause(300);
+if (wake(3).length !== 0) throw new Error("wake C overtook wake B into the omp queue");
+// The run of B drains and acknowledges both rows, so C is never replayed.
+await userStart(wake(2)[0].m);
+ackThrough(3);
+await endRun();
+await pause(2000);
+if (sent.length !== 2 || wake(1).length !== 1 || wake(2).length !== 1) throw new Error(`expected wakes 1 and B once each: ${JSON.stringify(sent)}`);
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch extension long run hold: $out"
+  [ -z "$out" ] || fail "omp watch extension long run hold test printed output: $out"
+  pass ".omp watch extension: held wakes stay held through a run longer than the hold bound and acknowledged rows are never replayed"
 }
 
 # The extension's own failure notices are not queue rows. A wake whose row a
@@ -1616,4 +1701,5 @@ test_watch_extension_replays_only_a_wake_whose_row_is_still_queued acked
 test_watch_extension_replays_only_a_wake_whose_row_is_still_queued queued
 test_watch_extension_holds_a_wake_until_the_handling_run_ends
 test_watch_extension_releases_a_held_wake_after_the_hold_bound
+test_watch_extension_keeps_holding_through_a_long_run
 test_watch_extension_delivers_a_failure_notice_without_a_queue_row

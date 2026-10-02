@@ -82,10 +82,11 @@
 // queued, a new queue-backed close is held in this extension instead of
 // joining omp's queue; the next plain agent_end releases every held close
 // back through the gate, which drops those that run's drain acknowledged.
-// A consumed wake or an accepted wake blocks holding only for
-// FM_OMP_WAKE_HOLD_MS, and a timer releases held closes through the same gate
-// once that bound passes, so a lost wake or a missing agent_end never stalls
-// a later one.
+// A consumed wake or an accepted wake stops blocking after FM_OMP_WAKE_HOLD_MS
+// only once main reads idle (on time alone without a handler context), and a
+// timer re-gates held closes at each bound, so a lost wake or a missing
+// agent_end never stalls a later one while a follow-up omp still holds mid-run
+// is never overtaken.
 // Messages with no row of their own (a supervision-host line, the watcher's
 // downtime re-announcement, and this extension's failure notices) are never
 // gated, and a continuity failure found for a dropped or held close is
@@ -853,7 +854,8 @@ export default function (pi: ExtensionAPI) {
   function queueDisposition(owner: SessionGeneration, pending: PendingActionableClose): "send" | "hold" | "drop" {
     if (pending.queueSeq === undefined) return "send";
     if (!wakeRowsQueued(pending.queueSeq)) return "drop";
-    const holding = (since: number): boolean => Date.now() - since < wakeHoldMs;
+    const mayExpire = !latestContext || latestContext.isIdle?.() === true;
+    const holding = (since: number): boolean => !mayExpire || Date.now() - since < wakeHoldMs;
     if (owner.handlingWakeSince && holding(owner.handlingWakeSince)) return "hold";
     for (const wake of owner.unconsumedWakes.values()) {
       const earlier = wake.pending.queueSeq;
