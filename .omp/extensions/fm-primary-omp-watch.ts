@@ -90,7 +90,8 @@
 // Messages with no row of their own (a supervision-host line, the watcher's
 // downtime re-announcement, and this extension's failure notices) are never
 // gated, and a continuity failure found for a dropped or held close is
-// surfaced on its own.
+// surfaced on its own. A held close restores its successor watcher once, when
+// it is held; its release delivers it without restoring or surfacing again.
 //
 // Interrupted-run recovery (stated once here):
 // A follow-up waits in omp's queue until the run ends. omp reads not idle
@@ -220,6 +221,10 @@ type SessionGeneration = {
   interruptCheck: number;
   // Queue-backed wakes held until the run handling an earlier wake ends.
   heldWakes: Set<string>;
+  // The restoration result of each held wake, by pending token. Its close was
+  // already restored, and any failure surfaced, when it was held, so a release
+  // delivers it without restoring again.
+  restoredWakes: Map<string, { generation: string; watcherPid: string } | undefined>;
   holdTimer: ReturnType<typeof setTimeout> | null;
   // When a wake was consumed in the run that has not reached a plain
   // agent_end; 0 when no such run is open.
@@ -635,6 +640,7 @@ function createGeneration(): SessionGeneration {
     steeredWakes: new Set(),
     interruptCheck: 0,
     heldWakes: new Set(),
+    restoredWakes: new Map(),
     holdTimer: null,
     handlingWakeSince: 0,
   };
@@ -1038,14 +1044,22 @@ export default function (pi: ExtensionAPI) {
         try {
           // A new restoration supersedes whatever became of the previous
           // successor; only a failure during this delivery is retried after it.
-          owner.deferredClose = null;
-          const restoration = await restoreAfterActionableClose(owner, pending.predecessorArmPid);
+          // A released held wake was restored when it was held.
+          let restoration: { failure: string; recovery?: { generation: string; watcherPid: string } };
+          if (owner.restoredWakes.has(pending.token)) {
+            restoration = { failure: "", recovery: owner.restoredWakes.get(pending.token) };
+          } else {
+            owner.deferredClose = null;
+            restoration = await restoreAfterActionableClose(owner, pending.predecessorArmPid);
+          }
           if (!generationIsLive(owner)) {
             settleClaim("failed");
             releaseClaim();
             return;
           }
           const delivered = await deliverActionableWake(owner, pending, restoration.failure, restoration.recovery);
+          if (owner.heldWakes.has(pending.token)) owner.restoredWakes.set(pending.token, restoration.recovery);
+          else owner.restoredWakes.delete(pending.token);
           if (!delivered || owner.heldWakes.has(pending.token)) {
             // A held record reached no one, so a replacement waiting on this
             // claim must still deliver it.

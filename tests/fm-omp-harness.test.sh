@@ -1405,7 +1405,8 @@ EOF
 # queue owner (bin/fm-wake-lib.sh) and then prints that wake, the order the
 # watcher keeps. Cycle n waits for state/.fire-<n>; with state/.hold-<n> present
 # it also waits for state/.print-<n> between the append and the print. A cycle
-# whose state/.fail-<n> exists closes at once with a typed failure instead.
+# whose state/.fail-<n> exists closes at once with a typed failure instead, and
+# a ready cycle exits with a typed failure once state/.die-<n> appears.
 install_queue_arm_fixture() {  # <repo>
   cat > "$1/bin/fm-watch-arm.sh" <<'SH'
 #!/usr/bin/env bash
@@ -1418,7 +1419,13 @@ if [ -e "$state/.fail-$n" ]; then
   exit 1
 fi
 printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-%s\n' "$$" "$n"
-while [ ! -e "$state/.fire-$n" ]; do sleep 0.05; done
+while [ ! -e "$state/.fire-$n" ]; do
+  if [ -e "$state/.die-$n" ]; then
+    printf 'watcher: FAILED - fixture watcher %s exited\n' "$n"
+    exit 1
+  fi
+  sleep 0.05
+done
 . "${FM_TEST_ROOT:?}/bin/fm-wake-lib.sh"
 fm_wake_append signal "wake-$n" "signal: queued wake $n" || exit 1
 if [ -e "$state/.hold-$n" ]; then
@@ -1677,6 +1684,87 @@ EOF
   pass ".omp watch extension: a held wake outlives the hold bound while main runs and is released through the queue gate once main reads idle"
 }
 
+# A held wake restored its successor watcher when it was held, so its release
+# delivers it at once without restoring again. restored: the successor was
+# ready, then exited before the release and its ordinary retry is still
+# pending; a second restoration would find no watcher and wait out its retry
+# backoff. failed: every successor start failed and main got that failure
+# once; release starts no second watcher cycle and does not surface the
+# failure again.
+test_watch_extension_releases_a_held_wake_without_restoring_again() {  # restored|failed
+  local variant=$1 repo home out status retry_ms=5
+  repo="$TMP_ROOT/watch-hold-restore-$variant/repo"; home="$TMP_ROOT/watch-hold-restore-$variant/home"
+  install_omp_extension_fixture "$repo"
+  install_queue_arm_fixture "$repo"
+  mkdir -p "$home/state"
+  if [ "$variant" = failed ]; then
+    : > "$home/state/.fail-3"; : > "$home/state/.fail-4"; : > "$home/state/.fail-5"; : > "$home/state/.fail-6"
+  else
+    retry_ms=8000
+  fi
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" VARIANT="$variant" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_OMP_WAKE_HOLD_MS=1500 \
+    FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS="$retry_ms" FM_WATCH_REARM_RETRY_MAX_MS="$retry_ms" \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync } from "node:fs";
+const state = `${process.env.FM_HOME}/state`;
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const failed = process.env.VARIANT === "failed";
+const handlers = new Map(); const sent = [];
+let idle = false;
+const ctx = { isIdle: () => idle, hasPendingMessages: () => false };
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const arms = () => Number(readFileSync(`${state}/.arm-count`, "utf8"));
+const waitFor = async (what, check) => {
+  for (let i = 0; i < 80; i += 1) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`${what}; sent ${JSON.stringify(sent.map((item) => item.m.replace(/^[^:]*: v1 watcher: /, "")))}`);
+};
+const wake = (n) => sent.filter((item) => item.m.includes(`FIRSTMATE WATCHER WAKE: signal: queued wake ${n}\n`));
+const failures = () => sent.filter((item) => /could not (restore watcher continuity|verify a ready successor)/.test(item.m)).length;
+const fire = (n) => writeFileSync(`${state}/.fire-${n}`, "");
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, ctx);
+// Wake 1 joins the omp queue and is never consumed.
+fire(1);
+await waitFor("wake 1 never reached omp", () => wake(1).length === 1);
+// Wake 2 closes behind it and is held; its restoration either readies arm 3
+// or fails arm 3 and its one retry, arm 4.
+fire(2);
+await waitFor("the restoration for wake 2 never finished", () => (failed ? failures() === 1 : arms() >= 3));
+await pause(300);
+if (wake(2).length !== 0) throw new Error("wake 2 was not held behind the unconsumed wake 1");
+if (!failed) {
+  // The ready successor exits; its ordinary retry waits out the long backoff.
+  writeFileSync(`${state}/.die-3`, "");
+  await pause(500);
+}
+const armsAtHold = arms();
+// Main reads idle; the hold bound releases wake 2 with no arrival and no agent_end.
+idle = true;
+await waitFor("the held wake was never released", () => wake(2).length === 1);
+await pause(500);
+if (arms() !== armsAtHold) throw new Error(`releasing a held wake started ${arms() - armsAtHold} more watcher cycle(s)`);
+if (failures() !== (failed ? 1 : 0)) throw new Error(`the continuity failure reached main ${failures()} times`);
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch extension held-wake release ($variant): $out"
+  [ -z "$out" ] || fail "omp watch extension held-wake release ($variant) test printed output: $out"
+  pass ".omp watch extension: releasing a held wake does not restore its successor again ($variant restoration)"
+}
+
 # During one long run, a wake held behind the handling run and a later wake
 # that closes more than one hold bound after it both stay out of the omp queue
 # until that run ends; then only rows still queued go out, and a row the next
@@ -1831,5 +1919,7 @@ test_watch_extension_replays_only_a_wake_whose_row_is_still_queued acked
 test_watch_extension_replays_only_a_wake_whose_row_is_still_queued queued
 test_watch_extension_holds_a_wake_until_the_handling_run_ends
 test_watch_extension_releases_a_held_wake_after_the_hold_bound
+test_watch_extension_releases_a_held_wake_without_restoring_again restored
+test_watch_extension_releases_a_held_wake_without_restoring_again failed
 test_watch_extension_keeps_holding_through_a_long_run
 test_watch_extension_delivers_a_failure_notice_without_a_queue_row
