@@ -36,7 +36,12 @@
 #      exactly and is delivered again once, and wakes an empty Enter stranded
 #      in omp's queue earn one distinct steer, tried again after a later
 #      settled run if omp rejects it; a failure notice queued while omp
-#      settles earns the same steer. A fake host cannot reproduce
+#      settles earns the same steer. A queue-backed wake goes out only while
+#      a wake-queue row it covers is unacknowledged: a replacement drops an
+#      acknowledged replay, and a wake that closes while main has another
+#      wake unread or is handling one waits for that run to end or a bounded
+#      hold, while the extension's own
+#      failure notices are never gated. A fake host cannot reproduce
 #      omp's queue, restore, or advisor, so only this policy is pinned here;
 #      FM_OMP_INTERRUPT_LIVE_E2E=1 tests/fm-omp-interrupt-live-e2e.test.sh
 #      re-checks the omp behavior it assumes.
@@ -57,6 +62,9 @@ set -u
 HARNESS="$ROOT/bin/fm-harness.sh"
 TMP_ROOT=$(fm_test_tmproot fm-omp-harness)
 export NODE_NO_WARNINGS=1
+# Arm fixtures append their wake rows through the real queue owner, as the
+# watcher does before it prints a reason (bin/fm-wake-lib.sh fm_wake_append).
+export FM_TEST_ROOT="$ROOT"
 
 # A process whose kernel-recorded identity is the bare name `omp`: a SYMLINK to
 # the system shell, never a copy (a copied platform binary fails macOS code
@@ -542,6 +550,8 @@ printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-1\n' "$$"
 if [ ! -e "${FM_HOME:?}/state/.e2e-fired" ]; then
   : > "$FM_HOME/state/.e2e-fired"
   sleep 1
+  . "${FM_TEST_ROOT:?}/bin/fm-wake-lib.sh"
+  fm_wake_append signal omp-e2e 'signal: omp-e2e done' || exit 1
   printf 'signal: omp-e2e done\n'
   exit 0
 fi
@@ -603,6 +613,8 @@ printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-%s\n' "$$" "
 if [ ! -e "${FM_HOME:?}/state/.e2e-fired" ]; then
   : > "$FM_HOME/state/.e2e-fired"
   sleep 1
+  . "${FM_TEST_ROOT:?}/bin/fm-wake-lib.sh"
+  fm_wake_append signal omp-interrupt 'signal: omp-interrupt done' || exit 1
   printf 'signal: omp-interrupt done\n'
   exit 0
 fi
@@ -859,6 +871,8 @@ n=$(( $(cat "${FM_HOME:?}/state/.arm-count" 2>/dev/null || echo 0) + 1 ))
 printf '%s\n' "$n" > "$FM_HOME/state/.arm-count"
 printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-%s\n' "$$" "$n"
 while [ ! -e "$FM_HOME/state/.fire-$n" ]; do sleep 0.05; done
+. "${FM_TEST_ROOT:?}/bin/fm-wake-lib.sh"
+fm_wake_append signal "omp-idle-$n" "signal: omp-idle wake $n" || exit 1
 printf 'signal: omp-idle wake %s\n' "$n"
 SH
   chmod +x "$repo/bin/fm-watch-arm.sh"
@@ -1339,6 +1353,8 @@ case "$(grep -c '^host=' "$FM_ARM_LOG")" in
   1)
     printf '%s\n' "$started"
     sleep 1
+    . "${FM_TEST_ROOT:?}/bin/fm-wake-lib.sh"
+    fm_wake_append signal omp-host-first 'signal: omp-host first' || exit 1
     printf 'signal: omp-host first\n'
     exit 0
     ;;
@@ -1369,6 +1385,7 @@ const mod = await import(pathToFileURL(process.env.EXT).href);
 mod.default(pi);
 await tool.execute();
 for (let i = 0; i < 80 && sent.length < 2; i += 1) await new Promise((r) => setTimeout(r, 100));
+if (sent.length !== 2 || !sent[0].m.includes("signal: omp-host first")) throw new Error(`expected the first close and then the split close: ${JSON.stringify(sent)}`);
 const second = sent.filter((item) => item.m.includes("signal: omp-host second"));
 if (second.length !== 1) throw new Error(`expected one follow-up for the split close, saw ${second.length}: ${JSON.stringify(sent)}`);
 if (!second[0].m.includes("supervision-host: outcome 2 for demo [captain]: fixture split")) {
@@ -1382,6 +1399,498 @@ EOF
   expect_code 0 "$status" "omp watch extension split host close: $out"
   [ -z "$out" ] || fail "omp watch extension split host close test printed output: $out"
   pass ".omp watch extension: a host close split across stream chunks reaches main as one whole follow-up"
+}
+
+# An arm fixture whose cycle n appends one real wake-queue row through the
+# queue owner (bin/fm-wake-lib.sh) and then prints that wake, the order the
+# watcher keeps. Cycle n waits for state/.fire-<n>; with state/.hold-<n> present
+# it also waits for state/.print-<n> between the append and the print. A cycle
+# whose state/.fail-<n> exists closes at once with a typed failure instead, and
+# a ready cycle exits with a typed failure once state/.die-<n> appears.
+install_queue_arm_fixture() {  # <repo>
+  cat > "$1/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+[ "${1:-}" = --handling-delivered ] && exit 0
+state="${FM_HOME:?}/state"
+n=$(( $(cat "$state/.arm-count" 2>/dev/null || echo 0) + 1 ))
+printf '%s\n' "$n" > "$state/.arm-count"
+if [ -e "$state/.fail-$n" ]; then
+  printf 'watcher: FAILED - fixture successor %s could not start\n' "$n"
+  exit 1
+fi
+printf 'watcher: started pid=%s (beacon 0s) recovery-generation=gen-%s\n' "$$" "$n"
+while [ ! -e "$state/.fire-$n" ]; do
+  if [ -e "$state/.die-$n" ]; then
+    printf 'watcher: FAILED - fixture watcher %s exited\n' "$n"
+    exit 1
+  fi
+  sleep 0.05
+done
+. "${FM_TEST_ROOT:?}/bin/fm-wake-lib.sh"
+fm_wake_append signal "wake-$n" "signal: queued wake $n" || exit 1
+if [ -e "$state/.hold-$n" ]; then
+  while [ ! -e "$state/.print-$n" ]; do sleep 0.05; done
+fi
+printf 'signal: queued wake %s\n' "$n"
+SH
+  chmod +x "$1/bin/fm-watch-arm.sh"
+}
+
+# Shared by the node hosts below: acknowledge every queued row through <seq>
+# the way the drain's --ack-through rewrites the queue.
+QUEUE_ACK_MODULE="$TMP_ROOT/queue-ack.mjs"
+cat > "$QUEUE_ACK_MODULE" <<'JS'
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
+export const ackThrough = (seq) => {
+  const queue = `${process.env.FM_HOME}/state/.wake-queue`;
+  const kept = readFileSync(queue, "utf8").split("\n").filter((row) => row && Number(row.split("\t")[1]) > seq);
+  writeFileSync(`${queue}.ack`, kept.map((row) => `${row}\n`).join(""));
+  renameSync(`${queue}.ack`, queue);
+};
+JS
+
+# A wake omp accepted but had not consumed rides the replacement handoff. When
+# the drain of another wake already acknowledged its queue row, the successor
+# session must not replay it; while its row is still queued, it must.
+test_watch_extension_replays_only_a_wake_whose_row_is_still_queued() {  # acked|queued
+  local variant=$1 repo home out status
+  repo="$TMP_ROOT/watch-replay-$variant/repo"; home="$TMP_ROOT/watch-replay-$variant/home"
+  install_omp_extension_fixture "$repo"
+  install_queue_arm_fixture "$repo"
+  mkdir -p "$home/state"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" QUEUE_ACK="$QUEUE_ACK_MODULE" VARIANT="$variant" FM_OMP_ARM_READY_TIMEOUT_MS=3000 \
+    FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
+const { ackThrough } = await import(pathToFileURL(process.env.QUEUE_ACK).href);
+const state = `${process.env.FM_HOME}/state`;
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const handoff = `${state}/extensions/omp-primary-watch/session-replacement-actionable.json`;
+const handlers = new Map(); let tool = null; const sent = [];
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool(t) { tool = t; },
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const waitFor = async (check) => { for (let i = 0; i < 40 && !check(); i += 1) await new Promise((r) => setTimeout(r, 50)); };
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await tool.execute();
+writeFileSync(`${state}/.fire-1`, "");
+await waitFor(() => sent.length >= 1);
+if (sent.length !== 1 || !sent[0].m.includes("FIRSTMATE WATCHER WAKE: signal: queued wake 1")) throw new Error(`expected wake 1: ${JSON.stringify(sent)}`);
+// The drain run for some other wake presents and acknowledges this row first.
+if (process.env.VARIANT === "acked") ackThrough(1);
+await handlers.get("session_shutdown")({}, {});
+const stored = JSON.parse(readFileSync(handoff, "utf8"));
+if (stored.pending.length !== 1) throw new Error(`the unconsumed wake did not ride the handoff: ${JSON.stringify(stored)}`);
+await handlers.get("session_start")({ type: "session_start" }, {});
+await waitFor(() => sent.length >= 2);
+await new Promise((r) => setTimeout(r, 300));
+const replays = sent.slice(1);
+if (process.env.VARIANT === "acked") {
+  if (replays.length !== 0) throw new Error(`a wake whose row was acknowledged was replayed: ${JSON.stringify(replays)}`);
+  if (existsSync(handoff)) throw new Error("a wake with no queued row must leave the handoff");
+} else {
+  if (replays.length !== 1 || replays[0].m !== sent[0].m) throw new Error(`a wake whose row is still queued must replay once: ${JSON.stringify(replays)}`);
+  await handlers.get("before_agent_start")({ type: "before_agent_start", prompt: replays[0].m }, {});
+}
+await handlers.get("session_shutdown")({}, {});
+if (existsSync(handoff)) throw new Error("a finished wake must not ride the handoff again");
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch extension replacement replay ($variant row): $out"
+  [ -z "$out" ] || fail "omp watch extension replacement replay test printed output ($variant row): $out"
+  pass ".omp watch extension: a replacement replays an unconsumed wake only while its queue row is unacknowledged ($variant row)"
+}
+
+# A wake that closes while main still has another wake to read, or is handling
+# one, waits in the extension instead of joining omp's queue. When that run
+# ends, the wake goes out only if its queue row is still unacknowledged: the
+# drain run of the earlier wake usually presented and acknowledged it already.
+test_watch_extension_holds_a_wake_until_the_handling_run_ends() {
+  local repo home out status
+  repo="$TMP_ROOT/watch-hold/repo"; home="$TMP_ROOT/watch-hold/home"
+  install_omp_extension_fixture "$repo"
+  install_queue_arm_fixture "$repo"
+  mkdir -p "$home/state"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" QUEUE_ACK="$QUEUE_ACK_MODULE" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_OMP_INTERRUPT_SETTLE_MS=20 \
+    FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
+const { ackThrough } = await import(pathToFileURL(process.env.QUEUE_ACK).href);
+const state = `${process.env.FM_HOME}/state`;
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const handoff = `${state}/extensions/omp-primary-watch/session-replacement-actionable.json`;
+const handlers = new Map(); const sent = [];
+let idle = false;
+const ctx = {
+  isIdle: () => idle,
+  hasPendingMessages: () => false,
+  ui: { getEditorText: () => "", setEditorText: () => { throw new Error("an empty editor must not be written"); } },
+};
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const arms = () => Number(readFileSync(`${state}/.arm-count`, "utf8"));
+const waitFor = async (what, check) => {
+  for (let i = 0; i < 60; i += 1) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`${what}; sent ${JSON.stringify(sent.map((item) => item.m.replace(/^[^:]*: v1 watcher: /, "")))}`);
+};
+const wake = (n) => sent.filter((item) => item.m.includes(`FIRSTMATE WATCHER WAKE: signal: queued wake ${n}\n`));
+const fire = (n) => writeFileSync(`${state}/.fire-${n}`, "");
+// omp takes a queued follow-up at the end of the running run.
+const userStart = (text) => handlers.get("message_start")({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } }, ctx);
+const endRun = () => handlers.get("agent_end")({ type: "agent_end" }, ctx);
+const settle = () => new Promise((r) => setTimeout(r, 300));
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, ctx);
+// Main is busy with a captain task when wake 1 closes: it joins the omp queue.
+fire(1);
+await waitFor("wake 1 never reached omp", () => wake(1).length === 1);
+if (wake(1)[0].o?.deliverAs !== "followUp") throw new Error("a wake that closes mid-run must be a follow-up");
+// Wake 2 closes while wake 1 still waits in the omp queue.
+fire(2);
+await waitFor("the successor of wake 2 never started", () => arms() >= 3);
+await settle();
+if (sent.length !== 1) throw new Error(`a wake that closed behind an unread wake joined the omp queue: ${JSON.stringify(sent.slice(1))}`);
+// The run takes wake 1; its drain presents and acknowledges rows 1 and 2.
+await userStart(wake(1)[0].m);
+ackThrough(2);
+await endRun();
+await settle();
+if (sent.length !== 1) throw new Error(`a held wake whose row was acknowledged was delivered: ${JSON.stringify(sent.slice(1))}`);
+// Main handles nothing from the watcher now, so wake 3 joins the omp queue.
+fire(3);
+await waitFor("wake 3 never reached omp", () => wake(3).length === 1);
+// Wake 4 closes while main handles wake 3; its row lands after that drain
+// presented the queue, so the acknowledgement leaves it queued.
+await userStart(wake(3)[0].m);
+fire(4);
+await waitFor("the successor of wake 4 never started", () => arms() >= 5);
+await settle();
+if (wake(4).length !== 0) throw new Error("a wake that closed during the handling run joined the omp queue");
+ackThrough(3);
+await endRun();
+await waitFor("a held wake whose row is still queued was never delivered", () => wake(4).length === 1);
+await userStart(wake(4)[0].m);
+ackThrough(4);
+await endRun();
+await settle();
+if (sent.length !== 3) throw new Error(`expected wakes 1, 3, and 4 only: ${JSON.stringify(sent)}`);
+await handlers.get("session_shutdown")({}, {});
+if (existsSync(handoff)) throw new Error("no consumed or dropped wake may ride the replacement handoff");
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch extension held wake: $out"
+  [ -z "$out" ] || fail "omp watch extension held wake test printed output: $out"
+  pass ".omp watch extension: a wake that closes behind another is held until that run ends and is delivered only while its row is queued"
+}
+
+# A held wake does not wait on a run end that may never come, yet its hold
+# never expires while main is still running. With an earlier wake that main
+# never consumes and no agent_end at all, a wake held behind it stays held past
+# the hold bound while main streams and goes out once main reads idle; a held
+# wake whose row a drain acknowledged meanwhile is dropped at the bound instead
+# of replayed; and a wake held by a consumed wake whose run never reports its
+# end also waits for main to read idle.
+test_watch_extension_releases_a_held_wake_after_the_hold_bound() {
+  local repo home out status
+  repo="$TMP_ROOT/watch-hold-bound/repo"; home="$TMP_ROOT/watch-hold-bound/home"
+  install_omp_extension_fixture "$repo"
+  install_queue_arm_fixture "$repo"
+  mkdir -p "$home/state"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" QUEUE_ACK="$QUEUE_ACK_MODULE" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_OMP_WAKE_HOLD_MS=1500 \
+    FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync } from "node:fs";
+const { ackThrough } = await import(pathToFileURL(process.env.QUEUE_ACK).href);
+const state = `${process.env.FM_HOME}/state`;
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const handlers = new Map(); const sent = [];
+let idle = false;
+const ctx = { isIdle: () => idle, hasPendingMessages: () => false };
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const arms = () => Number(readFileSync(`${state}/.arm-count`, "utf8"));
+const waitFor = async (what, check) => {
+  for (let i = 0; i < 80; i += 1) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`${what}; sent ${JSON.stringify(sent.map((item) => item.m.replace(/^[^:]*: v1 watcher: /, "")))}`);
+};
+const wake = (n) => sent.filter((item) => item.m.includes(`FIRSTMATE WATCHER WAKE: signal: queued wake ${n}\n`));
+const fire = (n) => writeFileSync(`${state}/.fire-${n}`, "");
+const userStart = (text) => handlers.get("message_start")({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } }, ctx);
+const endRun = () => handlers.get("agent_end")({ type: "agent_end" }, ctx);
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, ctx);
+// Wake 1 joins the omp queue and is never consumed.
+fire(1);
+await waitFor("wake 1 never reached omp", () => wake(1).length === 1);
+// Wake 2 closes behind it and is held; nothing else arrives and no run ends.
+fire(2);
+await waitFor("the successor of wake 2 never started", () => arms() >= 3);
+await pause(3500);
+if (sent.length !== 1) throw new Error(`a held wake went out while main was still running: ${JSON.stringify(sent.slice(1))}`);
+idle = true;
+await waitFor("a held wake was never released once main read idle", () => wake(2).length === 1);
+// Wake 3 is held behind wake 2, and a drain acknowledges every row before the bound.
+fire(3);
+await waitFor("the successor of wake 3 never started", () => arms() >= 4);
+ackThrough(3);
+await pause(3500);
+if (wake(3).length !== 0) throw new Error("a held wake whose row was acknowledged was delivered at the hold bound");
+// Main consumes wake 2, and its run never reports an end; wake 4 is held by it.
+idle = false;
+await userStart(wake(2)[0].m);
+fire(4);
+await waitFor("the successor of wake 4 never started", () => arms() >= 5);
+await pause(3500);
+if (wake(4).length !== 0) throw new Error("a wake held by a running handling run went out past the hold bound");
+idle = true;
+await waitFor("a wake held by a handling run was never released once main read idle", () => wake(4).length === 1);
+await pause(300);
+if (sent.length !== 3 || wake(1).length !== 1 || wake(2).length !== 1) throw new Error(`expected wakes 1, 2, and 4 once each: ${JSON.stringify(sent)}`);
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch extension hold bound: $out"
+  [ -z "$out" ] || fail "omp watch extension hold bound test printed output: $out"
+  pass ".omp watch extension: a held wake outlives the hold bound while main runs and is released through the queue gate once main reads idle"
+}
+
+# A held wake restored its successor watcher when it was held, so its release
+# delivers it at once without restoring again. restored: the successor was
+# ready, then exited before the release and its ordinary retry is still
+# pending; a second restoration would find no watcher and wait out its retry
+# backoff. failed: every successor start failed and main got that failure
+# once; release starts no second watcher cycle and does not surface the
+# failure again.
+test_watch_extension_releases_a_held_wake_without_restoring_again() {  # restored|failed
+  local variant=$1 repo home out status retry_ms=5
+  repo="$TMP_ROOT/watch-hold-restore-$variant/repo"; home="$TMP_ROOT/watch-hold-restore-$variant/home"
+  install_omp_extension_fixture "$repo"
+  install_queue_arm_fixture "$repo"
+  mkdir -p "$home/state"
+  if [ "$variant" = failed ]; then
+    : > "$home/state/.fail-3"; : > "$home/state/.fail-4"; : > "$home/state/.fail-5"; : > "$home/state/.fail-6"
+  else
+    retry_ms=8000
+  fi
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" VARIANT="$variant" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_OMP_WAKE_HOLD_MS=1500 \
+    FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS="$retry_ms" FM_WATCH_REARM_RETRY_MAX_MS="$retry_ms" \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync } from "node:fs";
+const state = `${process.env.FM_HOME}/state`;
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const failed = process.env.VARIANT === "failed";
+const handlers = new Map(); const sent = [];
+let idle = false;
+const ctx = { isIdle: () => idle, hasPendingMessages: () => false };
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const arms = () => Number(readFileSync(`${state}/.arm-count`, "utf8"));
+const waitFor = async (what, check) => {
+  for (let i = 0; i < 80; i += 1) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`${what}; sent ${JSON.stringify(sent.map((item) => item.m.replace(/^[^:]*: v1 watcher: /, "")))}`);
+};
+const wake = (n) => sent.filter((item) => item.m.includes(`FIRSTMATE WATCHER WAKE: signal: queued wake ${n}\n`));
+const failures = () => sent.filter((item) => /could not (restore watcher continuity|verify a ready successor)/.test(item.m)).length;
+const fire = (n) => writeFileSync(`${state}/.fire-${n}`, "");
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, ctx);
+// Wake 1 joins the omp queue and is never consumed.
+fire(1);
+await waitFor("wake 1 never reached omp", () => wake(1).length === 1);
+// Wake 2 closes behind it and is held; its restoration either readies arm 3
+// or fails arm 3 and its one retry, arm 4.
+fire(2);
+await waitFor("the restoration for wake 2 never finished", () => (failed ? failures() === 1 : arms() >= 3));
+await pause(300);
+if (wake(2).length !== 0) throw new Error("wake 2 was not held behind the unconsumed wake 1");
+if (!failed) {
+  // The ready successor exits; its ordinary retry waits out the long backoff.
+  writeFileSync(`${state}/.die-3`, "");
+  await pause(500);
+}
+const armsAtHold = arms();
+// Main reads idle; the hold bound releases wake 2 with no arrival and no agent_end.
+idle = true;
+await waitFor("the held wake was never released", () => wake(2).length === 1);
+await pause(500);
+if (arms() !== armsAtHold) throw new Error(`releasing a held wake started ${arms() - armsAtHold} more watcher cycle(s)`);
+if (failures() !== (failed ? 1 : 0)) throw new Error(`the continuity failure reached main ${failures()} times`);
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch extension held-wake release ($variant): $out"
+  [ -z "$out" ] || fail "omp watch extension held-wake release ($variant) test printed output: $out"
+  pass ".omp watch extension: releasing a held wake does not restore its successor again ($variant restoration)"
+}
+
+# During one long run, a wake held behind the handling run and a later wake
+# that closes more than one hold bound after it both stay out of the omp queue
+# until that run ends; then only rows still queued go out, and a row the next
+# drain acknowledged is never replayed.
+test_watch_extension_keeps_holding_through_a_long_run() {
+  local repo home out status
+  repo="$TMP_ROOT/watch-hold-long-run/repo"; home="$TMP_ROOT/watch-hold-long-run/home"
+  install_omp_extension_fixture "$repo"
+  install_queue_arm_fixture "$repo"
+  mkdir -p "$home/state"
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" QUEUE_ACK="$QUEUE_ACK_MODULE" FM_OMP_ARM_READY_TIMEOUT_MS=3000 FM_OMP_WAKE_HOLD_MS=1500 \
+    FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { writeFileSync, readFileSync } from "node:fs";
+const { ackThrough } = await import(pathToFileURL(process.env.QUEUE_ACK).href);
+const state = `${process.env.FM_HOME}/state`;
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const handlers = new Map(); const sent = [];
+let idle = false;
+const ctx = { isIdle: () => idle, hasPendingMessages: () => false };
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool() {},
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const arms = () => Number(readFileSync(`${state}/.arm-count`, "utf8"));
+const waitFor = async (what, check) => {
+  for (let i = 0; i < 80; i += 1) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`${what}; sent ${JSON.stringify(sent.map((item) => item.m.replace(/^[^:]*: v1 watcher: /, "")))}`);
+};
+const wake = (n) => sent.filter((item) => item.m.includes(`FIRSTMATE WATCHER WAKE: signal: queued wake ${n}\n`));
+const fire = (n) => writeFileSync(`${state}/.fire-${n}`, "");
+const userStart = (text) => handlers.get("message_start")({ type: "message_start", message: { role: "user", content: [{ type: "text", text }] } }, ctx);
+const endRun = () => handlers.get("agent_end")({ type: "agent_end" }, ctx);
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await handlers.get("session_start")({ type: "session_start" }, ctx);
+// Main takes wake 1 and starts a long run.
+fire(1);
+await waitFor("wake 1 never reached omp", () => wake(1).length === 1);
+await userStart(wake(1)[0].m);
+ackThrough(1);
+// Wake B closes during the run and is held behind it.
+fire(2);
+await waitFor("the successor of wake B never started", () => arms() >= 3);
+await pause(2000);
+// Wake C closes more than one hold bound after B.
+fire(3);
+await waitFor("the successor of wake C never started", () => arms() >= 4);
+await pause(2000);
+if (sent.length !== 1) throw new Error(`a wake went out during the long run: ${JSON.stringify(sent.slice(1))}`);
+// The long run ends: B goes out, and C waits behind B.
+await endRun();
+await waitFor("wake B was never delivered after the run ended", () => wake(2).length === 1);
+await pause(300);
+if (wake(3).length !== 0) throw new Error("wake C overtook wake B into the omp queue");
+// The run of B drains and acknowledges both rows, so C is never replayed.
+await userStart(wake(2)[0].m);
+ackThrough(3);
+await endRun();
+await pause(2000);
+if (sent.length !== 2 || wake(1).length !== 1 || wake(2).length !== 1) throw new Error(`expected wakes 1 and B once each: ${JSON.stringify(sent)}`);
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch extension long run hold: $out"
+  [ -z "$out" ] || fail "omp watch extension long run hold test printed output: $out"
+  pass ".omp watch extension: held wakes stay held through a run longer than the hold bound and acknowledged rows are never replayed"
+}
+
+# The extension's own failure notices are not queue rows. A wake whose row a
+# drain already acknowledged is not delivered, yet the continuity failure the
+# extension found while restoring its successor still reaches main.
+test_watch_extension_delivers_a_failure_notice_without_a_queue_row() {
+  local repo home out status
+  repo="$TMP_ROOT/watch-failure-notice/repo"; home="$TMP_ROOT/watch-failure-notice/home"
+  install_omp_extension_fixture "$repo"
+  install_queue_arm_fixture "$repo"
+  mkdir -p "$home/state"
+  : > "$home/state/.hold-1"
+  for n in 2 3 4; do : > "$home/state/.fail-$n"; done
+  out=$(FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" QUEUE_ACK="$QUEUE_ACK_MODULE" FM_OMP_ARM_READY_TIMEOUT_MS=3000 \
+    FM_WATCH_REARM_RETRY_LIMIT=1 FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 \
+    EXT="$repo/.omp/extensions/fm-primary-omp-watch.ts" node --input-type=module 2>&1 <<'EOF'
+import { pathToFileURL } from "node:url";
+import { writeFileSync, existsSync } from "node:fs";
+const { ackThrough } = await import(pathToFileURL(process.env.QUEUE_ACK).href);
+const state = `${process.env.FM_HOME}/state`;
+writeFileSync(`${state}/.lock`, `${process.pid}\n`);
+const handlers = new Map(); let tool = null; const sent = [];
+const pi = {
+  on(e, h) { handlers.set(e, h); },
+  registerCommand() {},
+  registerTool(t) { tool = t; },
+  sendUserMessage(m, o) { sent.push({ m, o }); return undefined; },
+};
+const mod = await import(pathToFileURL(process.env.EXT).href);
+mod.default(pi);
+await tool.execute();
+writeFileSync(`${state}/.fire-1`, "");
+// Another drain acknowledges row 1 before its watcher prints the wake.
+for (let i = 0; i < 60 && !existsSync(`${state}/.wake-queue`); i += 1) await new Promise((r) => setTimeout(r, 50));
+ackThrough(1);
+writeFileSync(`${state}/.print-1`, "");
+for (let i = 0; i < 60 && sent.length < 1; i += 1) await new Promise((r) => setTimeout(r, 50));
+if (sent.length !== 1) throw new Error(`expected exactly the continuity failure, saw ${JSON.stringify(sent)}`);
+if (!sent[0].m.includes("watcher: FAILED - omp extension could not restore watcher continuity after 1 retries")) {
+  throw new Error(`the continuity failure did not reach main: ${sent[0].m}`);
+}
+if (sent[0].m.includes("signal: queued wake 1")) throw new Error(`a wake with no queued row rode the failure notice: ${sent[0].m}`);
+await handlers.get("session_shutdown")({}, {});
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "omp watch extension failure notice: $out"
+  [ -z "$out" ] || fail "omp watch extension failure notice test printed output: $out"
+  pass ".omp watch extension: a continuity failure reaches main even when the wake it was found for has no queued row"
 }
 
 test_detection_anchored_name_and_marker_precedence
@@ -1406,3 +1915,11 @@ test_watch_extension_runs_the_supervision_host quiet
 test_watch_extension_keeps_the_arm_without_the_file_or_with_off
 test_watch_extension_replays_a_host_only_boundary_across_replacement
 test_watch_extension_delivers_a_split_host_close_whole
+test_watch_extension_replays_only_a_wake_whose_row_is_still_queued acked
+test_watch_extension_replays_only_a_wake_whose_row_is_still_queued queued
+test_watch_extension_holds_a_wake_until_the_handling_run_ends
+test_watch_extension_releases_a_held_wake_after_the_hold_bound
+test_watch_extension_releases_a_held_wake_without_restoring_again restored
+test_watch_extension_releases_a_held_wake_without_restoring_again failed
+test_watch_extension_keeps_holding_through_a_long_run
+test_watch_extension_delivers_a_failure_notice_without_a_queue_row
