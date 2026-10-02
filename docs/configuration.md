@@ -613,7 +613,8 @@ No-mistakes can publish Test evidence three ways, and the config handles each on
 - `test.evidence.store_in_repo: false` keeps the PR step from copying the run's evidence directory verbatim onto the orphan `no-mistakes/evidence` branch.
 - `test.evidence.attach_media: false` keeps the PR step from uploading images and videos to GitHub user-attachments.
 - The `evidence-review` gate runs after Test and always fails, so every run parks before Push and PR.
-  The PR body still renders the Test step's recorded text (summary, scenarios, findings, artifact labels and captions) and inlines the content of text evidence files, so that park is the point where the reviewer checks and cleans them.
+  The PR body still renders the Test step's recorded text (summary, scenarios, findings, artifact labels and captions, and the path of any artifact file it does not inline) and inlines the content of text evidence files, so that park is the point where the reviewer checks and cleans them.
+  The no-mistakes Test schema asks for an evidence file's full path, which sits under the home directory, and that recorded text cannot be edited after Test, so `test.instructions` tells the Test agent to leave every artifact path empty and put the evidence text in the artifact content.
 
 No-mistakes reads `store_in_repo` and `attach_media` from the pushed branch and reads `gates` and `test.instructions` only from the default-branch copy.
 A branch that turns either evidence setting back on reopens that route for its own run.

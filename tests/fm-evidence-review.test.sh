@@ -12,7 +12,11 @@ command -v python3 >/dev/null 2>&1 || fail "python3 is required for fm-evidence-
 TMP_ROOT=$(fm_test_tmproot fm-evidence-review)
 NMH="$TMP_ROOT/nm"
 mkdir -p "$NMH/evidence"
-USER_NAME=$(python3 -c 'import getpass; print(getpass.getuser())')
+# An invented user and home keep the operator's real identity out of every
+# fixture; getpass.getuser() reads LOGNAME first and Path.home() reads HOME.
+USER_NAME=quillsmith
+export LOGNAME="$USER_NAME" USER="$USER_NAME" HOME="$TMP_ROOT/home/$USER_NAME"
+mkdir -p "$HOME"
 
 # make_run <run-id> <summary> <round-caption>: one run with a Test step result
 # and one round, in the v1.79.0 table shape the helper reads.
@@ -44,14 +48,50 @@ assert_contains "$out" "fixture output line" "text evidence content is printed"
 assert_contains "$out" "--- shot.png (not UTF-8 text, 2 bytes)" "binary evidence is listed by size"
 pass "clean run prints records and files and exits 0"
 
-make_run leaky "Checked the private-widget repo as $USER_NAME." "plain caption"
+# The username keeps substring matching, so it is flagged inside a longer handle.
+make_run leaky "Checked the private-widget repo as ${USER_NAME}42." "plain caption"
 out=$("$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" --term private-widget leaky)
 rc=$?
 expect_code 1 "$rc" "username and term in Test text are flagged"
-assert_contains "$out" "username '$USER_NAME': test step result line" "username marker names its record"
+assert_contains "$out" "username '$USER_NAME': test step result line" "username inside a longer handle names its record"
 assert_contains "$out" "term 'private-widget': test step result line" "term marker names its record"
 assert_contains "$out" "(none)" "a run with no evidence directory reports no files"
 pass "markers in Test text exit 1"
+
+# Host markers come from the system host name and scutil. A fake scutil gives
+# invented names, so the fixture never carries this machine's real host name.
+# Host markers match whole words only, while terms keep substring matching.
+FAKE_BIN="$TMP_ROOT/fake-bin"
+mkdir -p "$FAKE_BIN"
+cat > "$FAKE_BIN/scutil" <<'SH'
+#!/bin/sh
+case "$2" in
+  ComputerName) echo "Tern Studio" ;;
+  LocalHostName) echo "tern" ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$FAKE_BIN/scutil"
+
+make_run hostword "Checked the pattern match in tern_cache for the interns." "plain caption"
+out=$(PATH="$FAKE_BIN:$PATH" "$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" hostword)
+rc=$?
+expect_code 0 "$rc" "a host name inside a longer word is not a hit"
+assert_not_contains "$out" "hostname '" "a host name inside a longer word is not flagged"
+
+make_run hostname "Ran on TERN, reached tern.example.test, then Tern Studio." "plain caption"
+out=$(PATH="$FAKE_BIN:$PATH" "$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" hostname)
+rc=$?
+expect_code 1 "$rc" "a whole-word host name is flagged"
+assert_contains "$out" "hostname 'tern': test step result line" "a whole-word host name names its record"
+assert_contains "$out" "hostname 'Tern Studio': test step result line" "a whole-word computer name names its record"
+
+make_run termword "Checked the widgetry module." "plain caption"
+out=$(PATH="$FAKE_BIN:$PATH" "$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" --term widget termword)
+rc=$?
+expect_code 1 "$rc" "a term inside a longer word is still flagged"
+assert_contains "$out" "term 'widget': test step result line" "a term keeps substring matching"
+pass "host names match whole words only and terms still match substrings"
 
 make_run homepath "Read notes at $HOME/notes/plan.txt." "plain caption"
 out=$("$ROOT/bin/fm-evidence-review.sh" --nm-home "$NMH" homepath)
