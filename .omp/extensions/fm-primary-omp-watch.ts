@@ -82,6 +82,10 @@
 // queued, a new queue-backed close is held in this extension instead of
 // joining omp's queue; the next plain agent_end releases every held close
 // back through the gate, which drops those that run's drain acknowledged.
+// A consumed wake or an accepted wake blocks holding only for
+// FM_OMP_WAKE_HOLD_MS, and a timer releases held closes through the same gate
+// once that bound passes, so a lost wake or a missing agent_end never stalls
+// a later one.
 // Messages with no row of their own (a supervision-host line, the watcher's
 // downtime re-announcement, and this extension's failure notices) are never
 // gated, and a continuity failure found for a dropped or held close is
@@ -178,6 +182,7 @@ type ReplacementActionableHandoff = {
 type UnconsumedWake = {
   content: string;
   pending: PendingActionableClose;
+  acceptedAt: number;
 };
 
 type SessionGeneration = {
@@ -208,8 +213,10 @@ type SessionGeneration = {
   interruptCheck: number;
   // Queue-backed wakes held until the run handling an earlier wake ends.
   heldWakes: Set<string>;
-  // A wake was consumed in the run that has not reached a plain agent_end.
-  handlingWake: boolean;
+  holdTimer: ReturnType<typeof setTimeout> | null;
+  // When a wake was consumed in the run that has not reached a plain
+  // agent_end; 0 when no such run is open.
+  handlingWakeSince: number;
 };
 
 const extensionFile = fileURLToPath(import.meta.url);
@@ -241,6 +248,7 @@ const hostReadyTimeoutMs = Math.max(armReadyTimeoutMs, 30000);
 const armRetireTimeoutMs = positiveInteger("FM_WATCH_ARM_RETIRE_TIMEOUT_MS", 1000);
 const interruptSettleMs = positiveInteger("FM_OMP_INTERRUPT_SETTLE_MS", 300);
 const interruptSettleCapMs = 60000;
+const wakeHoldMs = positiveInteger("FM_OMP_WAKE_HOLD_MS", 60000);
 const repairOnlyHint = "call fm_watch_arm_omp again only after a later notification says the cycle is missing, failed, or unhealthy";
 const shuttingDownMessage = "watcher: not armed - omp session is shutting down";
 
@@ -619,7 +627,8 @@ function createGeneration(): SessionGeneration {
     steeredWakes: new Set(),
     interruptCheck: 0,
     heldWakes: new Set(),
-    handlingWake: false,
+    holdTimer: null,
+    handlingWakeSince: 0,
   };
 }
 
@@ -635,8 +644,10 @@ function stopGeneration(generation: SessionGeneration): ChildProcess | null {
   generation.stopping = true;
   if (generation.retryTimer) clearTimeout(generation.retryTimer);
   if (generation.cleanupTimer) clearTimeout(generation.cleanupTimer);
+  if (generation.holdTimer) clearTimeout(generation.holdTimer);
   generation.retryTimer = null;
   generation.cleanupTimer = null;
+  generation.holdTimer = null;
   const child = generation.child;
   if (child) child.kill("SIGTERM");
   generation.child = null;
@@ -706,7 +717,7 @@ export default function (pi: ExtensionAPI) {
       "watcher",
       `FIRSTMATE WATCHER WAKE: ${message}\n\nRun bin/fm-wake-drain.sh first and handle the queued wake. Watcher continuity is extension-owned.`,
     );
-    if (pending) owner.unconsumedWakes.set(pending.token, { content, pending });
+    if (pending) owner.unconsumedWakes.set(pending.token, { content, pending, acceptedAt: Date.now() });
     try {
       const idle = latestContext?.isIdle?.() === true;
       await pi.sendUserMessage(content, idle ? undefined : { deliverAs: "followUp" });
@@ -728,7 +739,7 @@ export default function (pi: ExtensionAPI) {
       if (wake.content !== text) continue;
       owner.unconsumedWakes.delete(token);
       owner.steeredWakes.delete(token);
-      owner.handlingWake = true;
+      owner.handlingWakeSince = Date.now();
       wake.pending.delivered = true;
       try {
         finishPendingActionable(owner, wake.pending);
@@ -842,12 +853,31 @@ export default function (pi: ExtensionAPI) {
   function queueDisposition(owner: SessionGeneration, pending: PendingActionableClose): "send" | "hold" | "drop" {
     if (pending.queueSeq === undefined) return "send";
     if (!wakeRowsQueued(pending.queueSeq)) return "drop";
-    if (owner.handlingWake) return "hold";
+    const holding = (since: number): boolean => Date.now() - since < wakeHoldMs;
+    if (owner.handlingWakeSince && holding(owner.handlingWakeSince)) return "hold";
     for (const wake of owner.unconsumedWakes.values()) {
       const earlier = wake.pending.queueSeq;
-      if (wake.pending.token !== pending.token && earlier !== undefined && wakeRowsQueued(earlier)) return "hold";
+      if (wake.pending.token !== pending.token && earlier !== undefined && holding(wake.acceptedAt) && wakeRowsQueued(earlier)) {
+        return "hold";
+      }
     }
     return "send";
+  }
+
+  function releaseHeldWakes(owner: SessionGeneration): void {
+    if (owner.heldWakes.size === 0) return;
+    owner.heldWakes.clear();
+    void processPendingActionables(owner);
+  }
+
+  function scheduleHoldRelease(owner: SessionGeneration): void {
+    if (!generationIsLive(owner) || owner.holdTimer) return;
+    const timer = setTimeout(() => {
+      if (owner.holdTimer === timer) owner.holdTimer = null;
+      if (generationIsLive(owner)) releaseHeldWakes(owner);
+    }, wakeHoldMs);
+    timer.unref();
+    owner.holdTimer = timer;
   }
 
   // Returns false only when the generation is no longer live; a held or
@@ -861,7 +891,10 @@ export default function (pi: ExtensionAPI) {
     if (!generationIsLive(owner)) return false;
     const disposition = queueDisposition(owner, pending);
     if (disposition !== "send") {
-      if (disposition === "hold") owner.heldWakes.add(pending.token);
+      if (disposition === "hold") {
+        owner.heldWakes.add(pending.token);
+        scheduleHoldRelease(owner);
+      }
       if (failure) surfaceFailure(owner, failure);
       return true;
     }
@@ -954,7 +987,7 @@ export default function (pi: ExtensionAPI) {
         }
         // A record omp has accepted but not consumed is neither redelivered
         // nor finished here: consumption finishes it, replacement replays it.
-        // A held record waits for the end of the handling run.
+        // A held record waits for the end of the handling run or the hold bound.
         const pending = owner.pendingActionables.find(
           (item) => !item.delivered && !owner.unconsumedWakes.has(item.token) && !owner.heldWakes.has(item.token),
         );
@@ -1334,11 +1367,8 @@ export default function (pi: ExtensionAPI) {
     const owner = generation;
     // The run that handled a wake has ended; held wakes meet the queue gate
     // again, and only those whose rows are still queued go out.
-    owner.handlingWake = false;
-    if (owner.heldWakes.size > 0) {
-      owner.heldWakes.clear();
-      void processPendingActionables(owner);
-    }
+    owner.handlingWakeSince = 0;
+    releaseHeldWakes(owner);
     void recoverInterruptedRun(owner, ctx).catch((error) => {
       const detail = error instanceof Error ? error.message : String(error);
       surfaceFailure(owner, `watcher: FAILED - omp extension could not recover a wake an interrupted run left unsent\n${detail}`);
