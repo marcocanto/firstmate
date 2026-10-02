@@ -20,10 +20,11 @@
 #      non-regular entries are never followed or read.
 #   3. Hits: lines in sections 1 and 2 that still contain a home path (the
 #      "~" no-mistakes leaves after redacting the home directory), the
-#      operator's username, a hostname, a worktree path (a .treehouse/ path or
-#      a no-mistakes worktrees/ path), or a --term value after the home
-#      directory redaction no-mistakes applies to the PR body, plus each
-#      refused entry from section 2.
+#      operator's username, a hostname as a whole word, a worktree path (a
+#      .treehouse/ path or a no-mistakes worktrees/ path), or a --term value
+#      after the home directory redaction no-mistakes applies to the PR body,
+#      plus each refused entry from section 2. The username and --term values
+#      also match inside longer words.
 #
 # Inputs:
 #   --nm-home        no-mistakes home; default $NM_HOME, else ~/.no-mistakes.
@@ -197,7 +198,18 @@ def scutil_name(key: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def identity_markers(extra_terms: list[str]) -> list[tuple[str, str]]:
+# Host names are short machine labels that can occur inside ordinary words, so
+# a host marker matches only as a whole word. Username and --term markers keep
+# substring matching, because those private names often appear joined into a
+# longer handle, slug, or branch name.
+def marker_pattern(kind: str, value: str) -> re.Pattern[str]:
+    escaped = re.escape(value)
+    if kind == "hostname":
+        escaped = r"(?<!\w)" + escaped + r"(?!\w)"
+    return re.compile(escaped, re.IGNORECASE)
+
+
+def identity_markers(extra_terms: list[str]) -> list[tuple[str, str, re.Pattern[str]]]:
     markers: list[tuple[str, str]] = []
     try:
         markers.append(("username", getpass.getuser()))
@@ -209,14 +221,14 @@ def identity_markers(extra_terms: list[str]) -> list[tuple[str, str]]:
     for term in extra_terms:
         markers.append(("term", term))
     seen: set[str] = set()
-    usable: list[tuple[str, str]] = []
+    usable: list[tuple[str, str, re.Pattern[str]]] = []
     for kind, value in markers:
         value = value.strip()
         key = value.lower()
         if len(value) < 3 or key in seen:
             continue
         seen.add(key)
-        usable.append((kind, value))
+        usable.append((kind, value, marker_pattern(kind, value)))
     return usable
 
 
@@ -233,14 +245,14 @@ def worktree_markers(nm_home: Path, homes: list[str]) -> list[str]:
 REDACTED_HOME_RE = re.compile(r"(?:^|(?<=[\s\"'`(=:]))~(?=/|[\s\"'`),;:]|$)")
 
 
-def scan(label: str, text: str, homes: list[str], markers: list[tuple[str, str]], worktrees: list[str]) -> list[str]:
+def scan(label: str, text: str, homes: list[str], markers: list[tuple[str, str, re.Pattern[str]]], worktrees: list[str]) -> list[str]:
     hits: list[str] = []
     for number, line in enumerate(redact_home(text, homes).splitlines(), start=1):
         lowered = line.lower()
         if REDACTED_HOME_RE.search(line):
             hits.append(f"home path: {label} line {number}")
-        for kind, value in markers:
-            if value.lower() in lowered:
+        for kind, value, pattern in markers:
+            if pattern.search(line):
                 hits.append(f"{kind} {value!r}: {label} line {number}")
         for value in worktrees:
             if value.lower() in lowered:
