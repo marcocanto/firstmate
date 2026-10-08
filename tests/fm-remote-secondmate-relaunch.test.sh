@@ -214,14 +214,10 @@ pass "a local secondmate is refused by the remote relaunch tool"
 # --- a relaunch keeps an already-armed PR poll authenticating ---------------
 # fm-pr-check.sh now refuses to arm a poll on a kind=secondmate record, but a
 # record armed before that refusal can still carry the block until the
-# watcher retires it. fm-pr-check.sh wrote pr= (and, when a forge head was
-# readable, pr_head=) as the LAST lines of the record, and
-# fm_pr_metadata_identity_parse treats any other key appearing after pr= as
-# invalid, so this wrapper must not append its harness=/model=/effort= lines
-# after that identity block. The fixture is seeded the way such a record was
-# really written: pr= appended last to the meta, then the poll artifacts
-# published through the same fm_pr_poll_prepare/fm_pr_poll_publish_prepared
-# pair fm-pr-check.sh uses, since the refused entry point cannot arm it.
+# watcher retires it. The fixture is seeded the way such a record was really
+# written: pr= appended last to the meta, then the poll artifacts published
+# through the same fm_pr_poll_prepare/fm_pr_poll_publish_prepared pair
+# fm-pr-check.sh uses, since the refused entry point cannot arm it.
 reset_meta
 printf 'pr=https://github.com/example/repo/pull/1\n' >> "$HOME_DIR/state/ios.meta" \
   || fail "could not write the pr= identity for the relaunch-ordering test"
@@ -236,7 +232,7 @@ fm_pr_poll_artifacts_valid "$HOME_DIR/state" ios "$ROOT/bin/fm-pr-poll.sh" \
 OUT=$(run_relaunch ios claude claude-opus-5-5 medium); RC=$?
 expect_code 0 "$RC" "a confirmed remote relaunch should succeed with an armed PR poll"$'\n'"$OUT"
 fm_pr_poll_artifacts_valid "$HOME_DIR/state" ios "$ROOT/bin/fm-pr-poll.sh" \
-  || fail "a remote relaunch broke PR poll authentication by writing harness/model/effort after pr="
+  || fail "a remote relaunch broke PR poll authentication"
 pass "a remote relaunch keeps an already-armed PR poll authenticating"
 
 echo "ALL TESTS PASSED"
