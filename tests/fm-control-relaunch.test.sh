@@ -27,6 +27,8 @@ set -u
 . "$ROOT/bin/fm-trace-context-lib.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-tasks-axi-lib.sh"
+# shellcheck source=bin/fm-pr-lib.sh
+. "$ROOT/bin/fm-pr-lib.sh"
 
 CONTROL="$ROOT/bin/fm-control.sh"
 SPAWN="$ROOT/bin/fm-spawn.sh"
@@ -488,6 +490,46 @@ test_relaunch_preserves_durable_task_metadata() {
   [ "$(meta_field "$dir" rl19 decisions_reviewed)" = 1 ] \
     || fail "the task decision state must survive relaunch"
   pass "fm-control relaunch: durable task metadata survives replacement launch publication"
+}
+
+# A PR monitor armed on a task must keep authenticating after the task's other
+# lifecycle writers append their own fields behind pr=: captain-call completion
+# appends decisions_reviewed=/decision_keys=, and a relaunch republishes the
+# record with control_relaunch_tx= last.
+test_lifecycle_writers_keep_an_armed_pr_monitor_valid() {
+  local dir out rc id=rl44 url=https://github.com/example/repo/pull/44
+  local head=0123456789abcdef0123456789abcdef01234567
+  local state template="$ROOT/bin/fm-pr-poll.sh"
+  fm_tasks_axi_compatible || {
+    pass "skipped: compatible tasks-axi is not installed, so captain-call completion cannot run"
+    return 0
+  }
+  dir=$(new_case pr-monitor "$id")
+  add_ship_task "$dir" "$id" claude
+  state="$dir/home/state"
+  printf 'pr=%s\npr_head=%s\n' "$url" "$head" >> "$state/$id.meta"
+  fm_pr_poll_prepare "$state" "$id" github "$url" github.com example/repo 44 "$template" \
+    || fail "could not prepare the PR monitor fixture"
+  fm_pr_poll_publish_prepared || fail "could not publish the PR monitor fixture"
+  fm_pr_poll_artifacts_valid "$state" "$id" "$template" \
+    || fail "the PR monitor did not authenticate before any lifecycle writer ran"
+
+  out=$(env PATH="$dir/fakebin:$PATH" FM_HOME="$dir/home" FM_ROOT_OVERRIDE="$ROOT" \
+    HOME="$dir/user-home" "$ROOT/bin/fm-captain-hold.sh" complete "$id" --none 2>&1); rc=$?
+  expect_code 0 "$rc" "captain-call completion should record its attestation"$'\n'"$out"
+  [ "$(meta_field "$dir" "$id" decisions_reviewed)" = 1 ] \
+    || fail "captain-call completion did not record its attestation"
+  fm_pr_poll_artifacts_valid "$state" "$id" "$template" \
+    || fail "captain-call completion fields after pr= invalidated the PR monitor"
+
+  out=$(run_control "$dir" "$id" relaunch --note "continuing after review"); rc=$?
+  expect_code 0 "$rc" "a relaunch with an armed PR monitor should succeed"$'\n'"$out"
+  [ -n "$(meta_field "$dir" "$id" control_relaunch_tx)" ] \
+    || fail "the relaunch did not record its transaction"
+  fm_pr_poll_artifacts_valid "$state" "$id" "$template" \
+    || fail "relaunch fields after pr= invalidated the PR monitor"
+  [ "$FM_PR_META_URL" = "$url" ] || fail "the PR monitor read the wrong identity: $FM_PR_META_URL"
+  pass "lifecycle writers that append after pr= keep an armed PR monitor authenticating"
 }
 
 test_relaunch_serializes_concurrent_durable_metadata_publication() {
@@ -2391,6 +2433,7 @@ test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_durable_task_metadata
+test_lifecycle_writers_keep_an_armed_pr_monitor_valid
 test_relaunch_serializes_concurrent_durable_metadata_publication
 test_disabled_relaunch_clears_prior_trace_context
 test_relaunch_appends_the_progress_note_to_the_instructions
