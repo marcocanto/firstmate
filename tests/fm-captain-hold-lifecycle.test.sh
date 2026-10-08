@@ -4034,6 +4034,88 @@ test_retained_body_keeps_its_utf8_bytes() {
   pass "cleanup preserves every byte of a retained body's non-ASCII characters"
 }
 
+test_archived_captain_call_inventory() {
+  local home origin=sample-archive-review id=sample-archive-call variant out body
+  for variant in answered released unanswered digest origin missing; do
+    home=$(make_home "archive-$variant")
+    cat > "$home/.tasks.toml" <<'EOF'
+backend = "markdown"
+[markdown]
+path = "data/backlog.md"
+archive = "data/done-archive.md"
+done_keep = 1
+EOF
+    write_origin_meta "$home" "$origin"
+    if [ "$variant" != missing ]; then
+      run_captain "$home" hold "$id" --title "Choose the sample option" \
+        --reason "captain choice pending" --origin "$origin" >/dev/null \
+        || fail "could not create the archive call"
+      printf 'Use the sample option.\nKeep the recorded constraint.\n' > "$home/answer.txt"
+      case "$variant" in
+        unanswered)
+          tasks_in "$home" "done" "$id" >/dev/null || fail "could not close the unanswered fixture"
+          ;;
+        released)
+          run_captain "$home" answer "$id" --release --decision-file "$home/answer.txt" \
+            >/dev/null || fail "could not release the archive call"
+          tasks_in "$home" "done" "$id" >/dev/null || fail "could not close the released fixture"
+          ;;
+        *)
+          run_captain "$home" answer "$id" --decision-file "$home/answer.txt" \
+            >/dev/null || fail "could not answer the archive call"
+          ;;
+      esac
+      case "$variant" in
+        digest|origin)
+          body=$(tasks_in "$home" show "$id" --full | sed -n 's/^  body: //p')
+          body=$(printf '%s' "$body" | perl -MJSON::PP -e \
+            'local $/; print JSON::PP->new->allow_nonref->decode(<STDIN>)')
+          if [ "$variant" = digest ]; then
+            body=${body/Use the sample option./Use a different option.}
+          else
+            body=${body/Origin: $origin/Origin: sample-other-review}
+          fi
+          tasks_in "$home" update "$id" --body "$body" >/dev/null \
+            || fail "could not change the archive evidence"
+          ;;
+      esac
+      if [ "$variant" = answered ]; then
+        run_captain "$home" complete "$origin" "$id" >/dev/null \
+          || fail "the live answered call did not complete"
+        run_captain "$home" verify "$origin" >/dev/null \
+          || fail "the live answered call did not verify"
+      fi
+      tasks_in "$home" add sample-retention-next "Finish the next sample task" >/dev/null \
+        || fail "could not create the retention trigger"
+      tasks_in "$home" "done" sample-retention-next >/dev/null \
+        || fail "could not trigger Done retention"
+      if tasks_in "$home" show "$id" --full >/dev/null 2>&1; then
+        fail "the archive fixture still has a live call"
+      fi
+      assert_grep "- [x] $id - " "$home/data/done-archive.md" \
+        "tasks-axi did not retain the closed row"
+    fi
+    if [ "$variant" = answered ]; then
+      out=$(run_captain "$home" verify "$origin" 2>&1) \
+        || fail "retention blocked verification of the answered call: $out"
+      assert_contains "$out" "verified: $origin" "the retained inventory did not verify"
+      out=$(run_captain "$home" complete "$origin" "$id" 2>&1) \
+        || fail "retention blocked completion of the answered call: $out"
+      assert_contains "$out" "complete: $origin" "the archived call did not complete"
+    else
+      if out=$(run_captain "$home" complete "$origin" "$id" 2>&1); then
+        fail "completion accepted $variant archive evidence: $out"
+      fi
+      printf 'decisions_reviewed=1\ndecision_keys=%s\n' "$id" >> "$home/state/$origin.meta"
+      if out=$(run_captain "$home" verify "$origin" 2>&1); then
+        fail "verification accepted $variant archive evidence: $out"
+      fi
+    fi
+  done
+  pass "archived answers remain verifiable, but missing or conflicting evidence refuses"
+}
+
+test_archived_captain_call_inventory
 test_uninventoried_report_decision_refuses_completion
 test_hold_decodes_a_bare_scalar_body_without_the_nonref_default
 test_retained_body_keeps_its_utf8_bytes

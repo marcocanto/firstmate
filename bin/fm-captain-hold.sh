@@ -143,6 +143,12 @@
 # `verify` is read-only and is called by scout teardown, so teardown cannot
 # erase a source before this gate has succeeded: every recorded inventory
 # entry must still be durable and no keyed status decision may be open.
+# Both commands also read closed rows retained in `$DATA/done-archive.md` when
+# the live task is absent. An archived row must record `Resolution mode:
+# answered`, a digest matching the recorded ruling, and the reviewed origin
+# (or be that origin's own work item). Missing, unanswered, released, ambiguous,
+# or conflicting archived evidence refuses completion and verification.
+# Archive lookup never changes a row or feeds the answer mutation paths.
 # Metadata compatibility: the attestation keeps the historical
 # `decisions_reviewed=1` and `decision_keys=` keys, and an inventory entry that
 # names no existing task resolves through the legacy `<origin>-decision-<entry>`
@@ -720,21 +726,92 @@ resolve_migrated_entry() {  # <origin-or-empty> <entry>
   return 2
 }
 
+# Done retention appends closed task blocks under `## Archived <date>`.
+# Read only the exact closed row, with the same two-space body indentation as
+# the live markdown backlog. Repeated identities cannot prove one answer.
+ARCHIVED_TASK_BODY=
+archived_task_body() {  # <task-id>; sets ARCHIVED_TASK_BODY
+  local archive="$DATA/done-archive.md" status=0
+  [ -e "$archive" ] || return 1
+  [ -f "$archive" ] && [ -r "$archive" ] \
+    || fail "Done archive is not a readable file: $archive"
+  ARCHIVED_TASK_BODY=$(perl -e '
+    my ($path, $id) = @ARGV;
+    open my $file, "<:raw", $path or exit 2;
+    my ($archived, $inside, $count, @body);
+    while (my $line = <$file>) {
+      $line =~ s/\r?\n$//;
+      if ($line =~ /^##\s+/) {
+        $archived = $line =~ /^## Archived \d{4}-\d{2}-\d{2}$/;
+        $inside = 0;
+      } elsif ($archived && index($line, "- [x] $id - ") == 0) {
+        $inside = 1;
+        ++$count;
+      } elsif ($inside && ($line eq "" || $line =~ s/^  //)) {
+        push @body, $line;
+      } else {
+        $inside = 0;
+      }
+    }
+    exit 1 unless $count;
+    exit 2 unless $count == 1;
+    pop @body while @body && $body[-1] eq "";
+    print join("\n", @body);
+  ' "$archive" "$1") || status=$?
+  [ "$status" -ne 2 ] || fail "Done archive cannot identify a unique closed task $1"
+  return "$status"
+}
+
+verify_archived_answer() {  # <origin> <task-id>
+  local origin=$1 id=$2 body
+  archived_task_body "$id" || fail "archived captain-held task $id disappeared"
+  body=$ARCHIVED_TASK_BODY
+  # The digest covers the captain ruling, not the previous body appended below
+  # it. Test line-boundary prefixes so multi-line rulings retain their bytes.
+  if ! printf '%s' "$body" | perl -MDigest::SHA=sha256_hex -e '
+    local $/;
+    my $body = <STDIN>;
+    my ($origin, $id) = @ARGV;
+    my @origins = $body =~ /^Origin: (.+)$/mg;
+    exit 1 if @origins ? (@origins != 1 || $origins[0] ne $origin) : $id ne $origin;
+    $body =~ /\AResolution recorded by fm-(?:captain|decision)-hold\.\nDecision digest: ([0-9a-f]{64})\nResolution mode: answered\n\nCaptain decision:\n(.+)\z/s
+      or exit 1;
+    my ($digest, $rest) = ($1, $2);
+    my $answer = "";
+    for my $line (split /\n/, $rest, -1) {
+      $answer .= "\n" if length $answer;
+      $answer .= $line;
+      exit 0 if length($answer) && sha256_hex($answer) eq $digest;
+    }
+    exit 1;
+  ' "$origin" "$id"; then
+    fail "archived captain-held task $id has no answered resolution with a matching decision digest and origin"
+  fi
+}
+
 # Resolve one inventory entry or channel key to the task that carries it: the
 # exact task id when it exists, else the legacy derived identity, else - on the
 # beads backend - the migrated row the markdown-to-beads hold migration wrote.
-# Prints "<resolved id> <how>", where <how> is exact, legacy, migrated-note or
-# migrated-prefix, so a caller can record which evidence carried the attestation.
-resolve_entry() {  # <origin-or-empty> <entry>; prints "<id> <how>" or fails
-  local origin=$1 entry=$2 legacy migrated rc
+# Prints "<resolved id> <how>", where <how> is exact, legacy, archived,
+# migrated-note or migrated-prefix, so a caller can record the evidence.
+resolve_entry() {  # <origin-or-empty> <entry> [include-archive-0-or-1]; prints "<id> <how>"
+  local origin=$1 entry=$2 include_archive=${3:-0} legacy migrated rc
   if task_show "$entry"; then
     printf '%s exact' "$entry"
+    return 0
+  fi
+  if [ "$include_archive" = 1 ] && archived_task_body "$entry"; then
+    printf '%s archived' "$entry"
     return 0
   fi
   if [ -n "$origin" ] && [ "$origin" != "$BINDING_ANY" ]; then
     legacy=$(legacy_hold_id "$origin" "$entry")
     if task_show "$legacy"; then
       printf '%s legacy' "$legacy"
+      return 0
+    fi
+    if [ "$include_archive" = 1 ] && archived_task_body "$legacy"; then
+      printf '%s archived' "$legacy"
       return 0
     fi
   fi
@@ -800,14 +877,18 @@ write_hold_set_stamp() {  # <task-id> <shown-body> <timestamp> <preserve-existin
 # attestation evidence.
 verify_entry_durable() {  # <origin-or-empty> <entry>; prints "<id> <how>"
   local origin=$1 entry=$2 resolved resolve_status=0
-  resolved=$(resolve_entry "$origin" "$entry") || resolve_status=$?
+  resolved=$(resolve_entry "$origin" "$entry" 1) || resolve_status=$?
   if [ "$resolve_status" -ne 0 ]; then
     [ "$resolve_status" -ne 124 ] \
       || fail "the backlog backend exceeded its read bound resolving $entry"
     exit "$resolve_status"
   fi
   printf '%s\n' "$resolved"
-  verify_hold_durable "${resolved%% *}"
+  if [ "${resolved##* }" = archived ]; then
+    verify_archived_answer "$origin" "${resolved%% *}"
+  else
+    verify_hold_durable "${resolved%% *}"
+  fi
 }
 
 command_hold() {
