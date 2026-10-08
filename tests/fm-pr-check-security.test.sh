@@ -1123,6 +1123,35 @@ test_poll_publication_refuses_unsafe_destinations() {
   pass "poll publication paths refuse symlinks and directories"
 }
 
+# The PR identity in a task record is read the same way in any field order:
+# other lifecycle fields never invalidate it, while a duplicate pr=, a
+# malformed URL, or a malformed pr_head= still does, before or after pr=.
+test_metadata_identity_is_order_independent_and_strict() {
+  local dir meta url=https://github.com/o/r/pull/7
+  local head=0123456789abcdef0123456789abcdef01234567
+  dir="$TMP_ROOT/meta-identity-order"
+  mkdir -p "$dir"
+  meta="$dir/task.meta"
+
+  printf 'kind=ship\npr=%s\npr_head=%s\ndecisions_reviewed=1\ndecision_keys=\ncontrol_relaunch_tx=tx-1\n' \
+    "$url" "$head" > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && [ "$FM_PR_META_URL" = "$url" ] \
+    || fail "lifecycle fields after pr= invalidated the PR identity"
+  printf 'pr_head=%s\ncontrol_relaunch_tx=tx-1\npr=%s\nkind=ship\n' "$head" "$url" > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && [ "$FM_PR_META_NUMBER" = 7 ] \
+    || fail "pr_head= before pr= invalidated the PR identity"
+
+  printf 'pr=%s\ndecisions_reviewed=1\npr=%s\n' "$url" "$url" > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && fail "a duplicate pr= was accepted"
+  printf 'kind=ship\npr=https://github.com/o/r/issues/7\ndecisions_reviewed=1\n' > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && fail "a malformed PR URL was accepted"
+  printf 'pr=%s\ncontrol_relaunch_tx=tx-1\npr_head=not-a-sha\n' "$url" > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && fail "a malformed pr_head= after pr= was accepted"
+  printf 'pr_head=not-a-sha\nkind=ship\npr=%s\n' "$url" > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && fail "a malformed pr_head= before pr= was accepted"
+  pass "task-record PR identity is order-independent and still rejects duplicates and malformed values"
+}
+
 test_live_artifact_single_link_and_privacy_validation() {
   local artifact dir state alias rc
   for artifact in check.sh pr-poll pr-poll-registration; do
@@ -3473,6 +3502,7 @@ test_static_poll_contract
 test_atomic_interruption_leaves_no_partial_artifact
 test_concurrent_watcher_sees_only_complete_publication
 test_poll_publication_refuses_unsafe_destinations
+test_metadata_identity_is_order_independent_and_strict
 test_live_artifact_single_link_and_privacy_validation
 test_device_renumbered_poll_stays_armed
 test_device_rerecord_refuses_tampered_artifacts
