@@ -144,10 +144,12 @@
 # erase a source before this gate has succeeded: every recorded inventory
 # entry must still be durable and no keyed status decision may be open.
 # Both commands also read closed rows retained in `$DATA/done-archive.md` when
-# the live task is absent. An archived row must record `Resolution mode:
-# answered`, a digest matching the recorded ruling, and the reviewed origin
-# (or be that origin's own work item). Missing, unanswered, released, ambiguous,
-# or conflicting archived evidence refuses completion and verification.
+# the live task is absent. An archived row must lead with a resolution record
+# in either record format whose mode carries the captain's words (answered,
+# repaired, or routed) and whose digest matches the recorded ruling; when its
+# body names an origin it must name exactly the reviewed one. Missing,
+# unanswered, released, reconciled, ambiguous, or conflicting archived evidence
+# refuses completion and verification.
 # Archive lookup never changes a row or feeds the answer mutation paths.
 # Metadata compatibility: the attestation keeps the historical
 # `decisions_reviewed=1` and `decision_keys=` keys, and an inventory entry that
@@ -763,28 +765,31 @@ archived_task_body() {  # <task-id>; sets ARCHIVED_TASK_BODY
 }
 
 verify_archived_answer() {  # <origin> <task-id>
-  local origin=$1 id=$2 body
+  local origin=$1 id=$2 body mode
   archived_task_body "$id" || fail "archived captain-held task $id disappeared"
   body=$ARCHIVED_TASK_BODY
   # The digest covers the captain ruling, not the previous body appended below
   # it. Test line-boundary prefixes so multi-line rulings retain their bytes.
-  if ! printf '%s' "$body" | perl -MDigest::SHA=sha256_hex -e '
+  if ! mode=$(printf '%s' "$body" | perl -MDigest::SHA=sha256_hex -e '
     local $/;
     my $body = <STDIN>;
-    my ($origin, $id) = @ARGV;
+    my ($origin) = @ARGV;
     my @origins = $body =~ /^Origin: (.+)$/mg;
-    exit 1 if @origins ? (@origins != 1 || $origins[0] ne $origin) : $id ne $origin;
-    $body =~ /\AResolution recorded by fm-(?:captain|decision)-hold\.\nDecision digest: ([0-9a-f]{64})\nResolution mode: answered\n\nCaptain decision:\n(.+)\z/s
+    exit 1 if @origins && (@origins != 1 || $origins[0] ne $origin);
+    $body =~ /\AResolution recorded by fm-(?:captain|decision)-hold\.\nDecision digest: ([0-9a-f]{64})\n(?:Routed identities: [^\n]*\n)?Resolution mode: ([^\n]+)\n\nCaptain decision:\n(.+)\z/s
       or exit 1;
-    my ($digest, $rest) = ($1, $2);
+    my ($digest, $mode, $rest) = ($1, $2, $3);
     my $answer = "";
     for my $line (split /\n/, $rest, -1) {
       $answer .= "\n" if length $answer;
       $answer .= $line;
-      exit 0 if length($answer) && sha256_hex($answer) eq $digest;
+      if (length($answer) && sha256_hex($answer) eq $digest) {
+        print $mode;
+        exit 0;
+      }
     }
     exit 1;
-  ' "$origin" "$id"; then
+  ' "$origin") || ! closed_answer_replay_mode_compatible "$mode" "$body"; then
     fail "archived captain-held task $id has no answered resolution with a matching decision digest and origin"
   fi
 }
