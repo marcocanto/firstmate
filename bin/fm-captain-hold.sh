@@ -779,10 +779,9 @@ verify_archived_answer() {  # <origin> <task-id>
     $body =~ /\AResolution recorded by fm-(?:captain|decision)-hold\.\nDecision digest: ([0-9a-f]{64})\n(?:Routed identities: [^\n]*\n)?Resolution mode: ([^\n]+)\n\nCaptain decision:\n(.+)\z/s
       or exit 1;
     my ($digest, $mode, $rest) = ($1, $2, $3);
-    my $answer = "";
-    for my $line (split /\n/, $rest, -1) {
-      $answer .= "\n" if length $answer;
-      $answer .= $line;
+    my @lines = split /\n/, $rest, -1;
+    for my $last (0 .. $#lines) {
+      my $answer = join("\n", @lines[0 .. $last]);
       if (length($answer) && sha256_hex($answer) eq $digest) {
         print $mode;
         exit 0;

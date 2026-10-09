@@ -4036,7 +4036,7 @@ test_retained_body_keeps_its_utf8_bytes() {
 
 test_archived_captain_call_inventory() {
   local home origin=sample-archive-review id=sample-archive-call variant out body
-  for variant in answered existing repaired released reconciled unanswered digest origin missing; do
+  for variant in answered blank-first existing repaired released reconciled unanswered digest origin missing; do
     home=$(make_home "archive-$variant")
     cat > "$home/.tasks.toml" <<'EOF'
 backend = "markdown"
@@ -4058,6 +4058,8 @@ EOF
           || fail "could not create the archive call"
       fi
       printf 'Use the sample option.\nKeep the recorded constraint.\n' > "$home/answer.txt"
+      [ "$variant" != blank-first ] \
+        || printf '\nUse the sample option.\nKeep the recorded constraint.\n' > "$home/answer.txt"
       case "$variant" in
         repaired)
           tasks_in "$home" "done" "$id" >/dev/null || fail "could not close the repaired fixture"
@@ -4099,7 +4101,7 @@ EOF
             || fail "could not change the archive evidence"
           ;;
       esac
-      case "$variant" in answered|existing|repaired)
+      case "$variant" in answered|blank-first|existing|repaired)
         run_captain "$home" complete "$origin" "$id" >/dev/null \
           || fail "the live $variant call did not complete"
         run_captain "$home" verify "$origin" >/dev/null \
@@ -4116,7 +4118,7 @@ EOF
         "tasks-axi did not retain the closed row"
     fi
     case "$variant" in
-      answered|existing|repaired)
+      answered|blank-first|existing|repaired)
         out=$(run_captain "$home" verify "$origin" 2>&1) \
           || fail "retention blocked verification of the $variant call: $out"
         assert_contains "$out" "verified: $origin" "the retained inventory did not verify"
