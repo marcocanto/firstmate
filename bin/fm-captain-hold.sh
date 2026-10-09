@@ -145,7 +145,8 @@
 # entry must still be durable and no keyed status decision may be open.
 # Both commands also read closed rows retained in `$DATA/done-archive.md` when
 # the live task is absent. An archived row must lead with a resolution record
-# in either record format whose mode carries the captain's words (answered,
+# (after at most one `Captain hold set:` stamp an interrupted answer left) in
+# either record format whose mode carries the captain's words (answered,
 # repaired, or routed) and whose digest matches the recorded ruling; when its
 # body names an origin it must name exactly the reviewed one. Missing,
 # unanswered, released, reconciled, ambiguous, or conflicting archived evidence

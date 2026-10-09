@@ -103,6 +103,7 @@ A post-teardown visual review can complete against the surviving report and dura
 `complete` accepts `--none` as an explicit semantic inventory result.
 `--none` is refused while the origin still has a lifecycle-open keyed status decision.
 Before recording completion, `complete` verifies every listed task against tasks-axi.
+A listed task that tasks-axi Done retention has already moved out of the live backlog is verified from its closed row in the home's `data/done-archive.md` instead.
 
 With a non-empty inventory, `complete` appends a `captain-held [key=<key>]` transfer event for every still-open keyed status decision.
 The event names the reviewed inventory.
@@ -115,10 +116,15 @@ Scout teardown calls the read-only `verify` subcommand after checking for the re
 
 - The recorded attestation exists.
 - Every recorded inventory entry is still durable: actively captain-held, or carrying a recorded answer.
+  An entry absent from the live backlog is read from its closed row in `data/done-archive.md`.
 - No keyed status decision opened after the last `complete`.
 
 A keyed status decision opened after the last `complete` makes `verify` fail, and re-running `complete` is the repair.
 The `--force` path remains the explicit captain-approved discard escape hatch.
+
+Archived evidence is read-only and stricter than a live row.
+The archived row must be the only closed row with that id and must record the captain's own words with a digest matching the recorded ruling, so a missing, unanswered, released, or reconciled archived call still refuses `complete` and `verify`.
+The header of `bin/fm-captain-hold.sh` owns the exact acceptance rules.
 
 ## Cleanup never closes a captain call
 
@@ -514,6 +520,8 @@ The suite does not test the accepted merge-to-cleanup re-hold window or asynchro
 - A report-only unresolved captain call refuses `--none` completion before teardown can erase the source.
 - Non-forced scout teardown always requires the durable inventory verification.
 - The recorded-answer guard holds: a bare `tasks-axi done` close fails `verify` until `answer` records the captain's word, and an ordinary finished task cannot be dressed up as an answered call.
+- An answered or repaired call that Done retention archived still passes `complete` and `verify`, including a pre-collapse record, a ruling that starts with a blank line, and a row an interrupted answer left stamp-first.
+  A missing, unanswered, released, reconciled, digest-mismatched, or wrong-origin archived row refuses both.
 
 ### Answers, stamps, and deferral
 
