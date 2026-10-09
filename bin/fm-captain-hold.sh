@@ -776,7 +776,7 @@ verify_archived_answer() {  # <origin> <task-id>
     my ($origin) = @ARGV;
     my @origins = $body =~ /^Origin: (.+)$/mg;
     exit 1 if @origins && (@origins != 1 || $origins[0] ne $origin);
-    $body =~ /\AResolution recorded by fm-(?:captain|decision)-hold\.\nDecision digest: ([0-9a-f]{64})\n(?:Routed identities: [^\n]*\n)?Resolution mode: ([^\n]+)\n\nCaptain decision:\n(.+)\z/s
+    $body =~ /\A(?:Captain hold set: \d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}Z)?\n\n)?Resolution recorded by fm-(?:captain|decision)-hold\.\nDecision digest: ([0-9a-f]{64})\n(?:Routed identities: [^\n]*\n)?Resolution mode: ([^\n]+)\n\nCaptain decision:\n(.+)\z/s
       or exit 1;
     my ($digest, $mode, $rest) = ($1, $2, $3);
     my @lines = split /\n/, $rest, -1;

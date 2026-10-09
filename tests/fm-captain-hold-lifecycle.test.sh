@@ -4036,7 +4036,7 @@ test_retained_body_keeps_its_utf8_bytes() {
 
 test_archived_captain_call_inventory() {
   local home origin=sample-archive-review id=sample-archive-call variant out body
-  for variant in answered blank-first existing repaired released reconciled unanswered digest origin missing; do
+  for variant in answered blank-first stamp-first existing repaired released reconciled unanswered digest origin missing; do
     home=$(make_home "archive-$variant")
     cat > "$home/.tasks.toml" <<'EOF'
 backend = "markdown"
@@ -4088,20 +4088,20 @@ EOF
           ;;
       esac
       case "$variant" in
-        digest|origin)
+        digest|origin|stamp-first)
           body=$(tasks_in "$home" show "$id" --full | sed -n 's/^  body: //p')
           body=$(printf '%s' "$body" | perl -MJSON::PP -e \
             'local $/; print JSON::PP->new->allow_nonref->decode(<STDIN>)')
-          if [ "$variant" = digest ]; then
-            body=${body/Use the sample option./Use a different option.}
-          else
-            body=${body/Origin: $origin/Origin: sample-other-review}
-          fi
+          case "$variant" in
+            digest) body=${body/Use the sample option./Use a different option.} ;;
+            origin) body=${body/Origin: $origin/Origin: sample-other-review} ;;
+            *) body=$(printf 'Captain hold set: 2026-09-01T00:00:00Z\n\n%s' "$body") ;;
+          esac
           tasks_in "$home" update "$id" --body "$body" >/dev/null \
             || fail "could not change the archive evidence"
           ;;
       esac
-      case "$variant" in answered|blank-first|existing|repaired)
+      case "$variant" in answered|blank-first|stamp-first|existing|repaired)
         run_captain "$home" complete "$origin" "$id" >/dev/null \
           || fail "the live $variant call did not complete"
         run_captain "$home" verify "$origin" >/dev/null \
@@ -4118,7 +4118,7 @@ EOF
         "tasks-axi did not retain the closed row"
     fi
     case "$variant" in
-      answered|blank-first|existing|repaired)
+      answered|blank-first|stamp-first|existing|repaired)
         out=$(run_captain "$home" verify "$origin" 2>&1) \
           || fail "retention blocked verification of the $variant call: $out"
         assert_contains "$out" "verified: $origin" "the retained inventory did not verify"
