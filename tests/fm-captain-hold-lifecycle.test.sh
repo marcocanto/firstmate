@@ -4034,6 +4034,157 @@ test_retained_body_keeps_its_utf8_bytes() {
   pass "cleanup preserves every byte of a retained body's non-ASCII characters"
 }
 
+test_archived_captain_call_inventory() {
+  local home origin=sample-archive-review id=sample-archive-call variant out body
+  for variant in answered blank-first stamp-first existing repaired released reconciled unanswered digest origin missing; do
+    home=$(make_home "archive-$variant")
+    cat > "$home/.tasks.toml" <<'EOF'
+backend = "markdown"
+[markdown]
+path = "data/backlog.md"
+archive = "data/done-archive.md"
+done_keep = 1
+EOF
+    write_origin_meta "$home" "$origin"
+    if [ "$variant" != missing ]; then
+      if [ "$variant" = existing ] || [ "$variant" = reconciled ]; then
+        tasks_in "$home" add "$id" "Finish the sample work item" --repo sample >/dev/null \
+          || fail "could not create the existing work item"
+        run_captain "$home" hold "$id" --reason "captain choice pending" >/dev/null \
+          || fail "could not hold the existing work item"
+      else
+        run_captain "$home" hold "$id" --title "Choose the sample option" \
+          --reason "captain choice pending" --origin "$origin" >/dev/null \
+          || fail "could not create the archive call"
+      fi
+      printf 'Use the sample option.\nKeep the recorded constraint.\n' > "$home/answer.txt"
+      [ "$variant" != blank-first ] \
+        || printf '\nUse the sample option.\nKeep the recorded constraint.\n' > "$home/answer.txt"
+      case "$variant" in
+        repaired)
+          tasks_in "$home" "done" "$id" >/dev/null || fail "could not close the repaired fixture"
+          run_captain "$home" answer "$id" --decision-file "$home/answer.txt" \
+            >/dev/null || fail "could not record the repaired answer"
+          assert_contains "$(tasks_in "$home" show "$id" --full)" "Resolution mode: repaired" \
+            "the out-of-band close was not recorded as a repaired answer"
+          ;;
+        reconciled)
+          request_reconciles "$home" sample-archive-board "$id" \
+            || fail "could not request the reconciliation"
+          run_captain "$home" reconcile close "$id" --evidence-file "$home/answer.txt" \
+            >/dev/null || fail "could not reconcile the archive call"
+          ;;
+        unanswered)
+          tasks_in "$home" "done" "$id" >/dev/null || fail "could not close the unanswered fixture"
+          ;;
+        released)
+          run_captain "$home" answer "$id" --release --decision-file "$home/answer.txt" \
+            >/dev/null || fail "could not release the archive call"
+          tasks_in "$home" "done" "$id" >/dev/null || fail "could not close the released fixture"
+          ;;
+        *)
+          run_captain "$home" answer "$id" --decision-file "$home/answer.txt" \
+            >/dev/null || fail "could not answer the archive call"
+          ;;
+      esac
+      case "$variant" in
+        digest|origin|stamp-first)
+          body=$(tasks_in "$home" show "$id" --full | sed -n 's/^  body: //p')
+          body=$(printf '%s' "$body" | perl -MJSON::PP -e \
+            'local $/; print JSON::PP->new->allow_nonref->decode(<STDIN>)')
+          case "$variant" in
+            digest) body=${body/Use the sample option./Use a different option.} ;;
+            origin) body=${body/Origin: $origin/Origin: sample-other-review} ;;
+            *) body=$(printf 'Captain hold set: 2026-09-01T00:00:00Z\n\n%s' "$body") ;;
+          esac
+          tasks_in "$home" update "$id" --body "$body" >/dev/null \
+            || fail "could not change the archive evidence"
+          ;;
+      esac
+      case "$variant" in answered|blank-first|stamp-first|existing|repaired)
+        run_captain "$home" complete "$origin" "$id" >/dev/null \
+          || fail "the live $variant call did not complete"
+        run_captain "$home" verify "$origin" >/dev/null \
+          || fail "the live $variant call did not verify"
+      esac
+      tasks_in "$home" add sample-retention-next "Finish the next sample task" >/dev/null \
+        || fail "could not create the retention trigger"
+      tasks_in "$home" "done" sample-retention-next >/dev/null \
+        || fail "could not trigger Done retention"
+      if tasks_in "$home" show "$id" --full >/dev/null 2>&1; then
+        fail "the archive fixture still has a live call"
+      fi
+      assert_grep "- [x] $id - " "$home/data/done-archive.md" \
+        "tasks-axi did not retain the closed row"
+    fi
+    case "$variant" in
+      answered|blank-first|stamp-first|existing|repaired)
+        out=$(run_captain "$home" verify "$origin" 2>&1) \
+          || fail "retention blocked verification of the $variant call: $out"
+        assert_contains "$out" "verified: $origin" "the retained inventory did not verify"
+        out=$(run_captain "$home" complete "$origin" "$id" 2>&1) \
+          || fail "retention blocked completion of the $variant call: $out"
+        assert_contains "$out" "complete: $origin" "the archived call did not complete"
+        ;;
+      *)
+        if out=$(run_captain "$home" complete "$origin" "$id" 2>&1); then
+          fail "completion accepted $variant archive evidence: $out"
+        fi
+        printf 'decisions_reviewed=1\ndecision_keys=%s\n' "$id" >> "$home/state/$origin.meta"
+        if out=$(run_captain "$home" verify "$origin" 2>&1); then
+          fail "verification accepted $variant archive evidence: $out"
+        fi
+        ;;
+    esac
+  done
+  pass "archived answers remain verifiable, but missing or conflicting evidence refuses"
+}
+
+test_archived_pre_collapse_answer_verifies() {
+  local home origin=sample-archive-legacy hold text digest out
+  home=$(make_home archive-legacy)
+  cat > "$home/.tasks.toml" <<'EOF'
+backend = "markdown"
+[markdown]
+path = "data/backlog.md"
+archive = "data/done-archive.md"
+done_keep = 1
+EOF
+  write_origin_meta "$home" "$origin"
+  hold=$(run_shim "$home" hold "$origin" old-choice \
+    --title "Old choice" --reason "captain old choice pending" --repo sample) \
+    || fail "could not create the pre-collapse hold"
+  text=$(printf 'Captain answered this decision through legacy replay.\nDecision key: old-choice\nAnswer: option c\n')
+  if command -v shasum >/dev/null 2>&1; then
+    digest=$(printf '%s' "$text" | shasum -a 256 | awk '{print $1}')
+  else
+    digest=$(printf '%s' "$text" | sha256sum | awk '{print $1}')
+  fi
+  printf 'Resolution recorded by fm-decision-hold.\nDecision digest: %s\nRouted identities: none\nResolution mode: answered\n\nCaptain decision:\n%s\n' \
+    "$digest" "$text" > "$home/legacy-body.txt"
+  tasks_in "$home" update "$hold" --body-file "$home/legacy-body.txt" --archive-body >/dev/null \
+    || fail "could not write the pre-collapse record"
+  tasks_in "$home" "done" "$hold" >/dev/null || fail "could not close the pre-collapse hold"
+  run_captain "$home" complete "$origin" old-choice >/dev/null \
+    || fail "the live pre-collapse answer did not complete"
+  tasks_in "$home" add sample-retention-next "Finish the next sample task" >/dev/null \
+    || fail "could not create the retention trigger"
+  tasks_in "$home" "done" sample-retention-next >/dev/null \
+    || fail "could not trigger Done retention"
+  if tasks_in "$home" show "$hold" --full >/dev/null 2>&1; then
+    fail "the pre-collapse fixture still has a live hold"
+  fi
+  out=$(run_captain "$home" verify "$origin" 2>&1) \
+    || fail "retention blocked verification of the pre-collapse answer: $out"
+  assert_contains "$out" "verified: $origin" "the retained pre-collapse inventory did not verify"
+  out=$(run_captain "$home" complete "$origin" old-choice 2>&1) \
+    || fail "retention blocked completion of the pre-collapse answer: $out"
+  assert_contains "$out" "complete: $origin" "the archived pre-collapse answer did not complete"
+  pass "an archived answered pre-collapse record still verifies"
+}
+
+test_archived_captain_call_inventory
+test_archived_pre_collapse_answer_verifies
 test_uninventoried_report_decision_refuses_completion
 test_hold_decodes_a_bare_scalar_body_without_the_nonref_default
 test_retained_body_keeps_its_utf8_bytes
