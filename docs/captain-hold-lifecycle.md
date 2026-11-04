@@ -52,7 +52,9 @@ It works in this order:
 1. It uses an existing task, or creates one when nothing exists to hold.
 2. It records the task's UTC hold-set timestamp as the leading line of the task body.
 3. It invokes the underlying tasks-axi hold operation.
-4. It verifies both records.
+4. It verifies the captain-hold annotations and timestamp.
+5. In a secondmate home, it publishes the verified hold to the parent channel.
+6. When `--origin` is supplied, it records the origin on the task, replacing any previous association only after the backend hold succeeds.
 
 Publishing the stamp first ensures a snapshot cannot observe a newly captain-held task without the timestamp that defines its age.
 
@@ -62,6 +64,19 @@ Repeat and edge cases:
 - Re-holding released work starts a new timestamped lifecycle.
 - A closed task is refused rather than reopened.
 - `--until` stores the captain's own deferral date through tasks-axi's date gate.
+- `--origin` resolves the backend origin identity before writing the hold-set stamp.
+  The association lives on its own `Captain hold origin:` body line; [completion inventory checks](#recording-a-reviewed-inventory-complete) own how it is verified.
+  The ordering above prevents an interrupted or refused backend hold from publishing the new association, even when an old captain hold is still active or date-expired.
+- If the backend hold fails, `hold` attempts to restore the previous body.
+  If restoration also fails, the new stamp can remain, but the previous origin is unchanged.
+  If the subsequent origin write fails, the command returns nonzero, but the successful captain hold and its stamp remain with the previous association (or with no recorded origin for a new task).
+  Parent publication is attempted before that write in a secondmate home, so an origin-write failure cannot skip delivery; a channel failure retains the existing `actionable:` diagnostic.
+  Re-running `hold` retries origin publication without duplicating the parent decision.
+- If an incomplete hold leaves a stamp above an earlier answer, the [completion durability boundary](#recording-a-reviewed-inventory-complete) applies.
+  When the task already records its previous origin, replaying the earlier `answer --release` can remove that stamp, and normal work completion can retain the answer, but neither transition changes the stored origin: neither can certify the failed move's new origin.
+  Re-running `hold` completes the move, and re-running the same `answer --release` also normalizes a release interrupted before its stamp was removed.
+- The reason may contain parentheses, semicolons, quotes, and line breaks.
+  [`bin/fm-hold-reason-lib.sh`](../bin/fm-hold-reason-lib.sh) owns the storage encoding and compatibility rules; [`bin/fm-tasks-axi.sh --help`](../bin/fm-tasks-axi.sh) owns the public read commands and output contract.
 
 ### Answering a call (`answer`)
 
@@ -73,6 +88,8 @@ The `answer` subcommand records the captain's exact words and resolves the call 
 | `answer --release` | Frees a captain-gated work item to proceed without completing it. |
 
 It requires a non-empty captain decision file of at most 8192 bytes.
+`answer --release` is attended-only: while the away-posture record exists it is refused before anything is written, and the keyed-answer intake refuses a `release` line the same way, because only the captain in an attended session releases a captain hold.
+A quiet record is a present captain and does not refuse.
 It then works in this order:
 
 1. It durably writes a resolution block carrying the decision digest and a `Resolution mode:`.
@@ -97,13 +114,22 @@ An expired deferral therefore remains answerable.
 
 ### Recording a reviewed inventory (`complete`)
 
-While originating task metadata is live, the `complete` subcommand unions the reviewed captain-held task ids, called the reviewed inventory, into `decision_keys=` and appends `decisions_reviewed=1`.
+While originating task metadata is live, the `complete` subcommand unions the reviewed captain-held task ids, called the reviewed inventory, into `decision_keys=` and records `decisions_reviewed=1`, replacing any earlier pair and writing it once ahead of any armed `pr=` merge-poll identity lines, because the metadata identity parse refuses these keys after `pr=`.
 A post-teardown visual review can complete against the surviving report and durable tasks without recreating volatile task metadata.
+The [lifecycle policy](../.agents/skills/captain-hold-lifecycle/SKILL.md#policy) assigns caller authority, including the scout's brief-scoped exception for an empty inventory.
+`tests/fm-brief.test.sh` pins that the scout brief's outside-worktree rule names exactly that `complete --none` command, so the write boundary and the completion step cannot drift apart again.
 
 `complete` accepts `--none` as an explicit semantic inventory result.
 `--none` is refused while the origin still has a lifecycle-open keyed status decision.
 Before recording completion, `complete` verifies every listed task against tasks-axi.
-A listed task that tasks-axi Done retention has already moved out of the live backlog is verified from its closed row in the home's `data/done-archive.md` instead.
+A durable entry is an open task with captain-hold annotations (including a date-expired hold), or a task carrying a recorded resolution.
+For an open task without those annotations, a leading hold-set stamp above the resolution is refused: the answer alone cannot establish durability while the hold or release normalization is incomplete.
+A Done task still requires a recorded resolution, but is not subject to that stamp refusal.
+An answered entry that markdown Done retention moved into the configured Done archive still counts, while an archived close with no recorded answer does not.
+The origin is never its own inventory entry, so a hold that failed cannot be vouched for by the origin row.
+For a historical inventory that names its own origin, hold a separate captain task with `--origin`, replace only the invalid entry in the final `decision_keys=` line of the origin metadata with that task id while preserving all other entries, and re-run `complete`.
+An entry whose recorded origin differs from the one being completed is refused, comparing backend identities rather than alias spellings.
+An entry with no recorded origin, such as a hold made before origins were recorded or without `--origin`, is accepted on the durability check alone and named in the output.
 
 With a non-empty inventory, `complete` appends a `captain-held [key=<key>]` transfer event for every still-open keyed status decision.
 The event names the reviewed inventory.
@@ -115,16 +141,11 @@ Scout teardown calls the read-only `verify` subcommand after checking for the re
 `verify` checks three things:
 
 - The recorded attestation exists.
-- Every recorded inventory entry is still durable: actively captain-held, or carrying a recorded answer.
-  An entry absent from the live backlog is read from its closed row in `data/done-archive.md`.
+- Every recorded inventory entry still passes the [completion inventory checks](#recording-a-reviewed-inventory-complete).
 - No keyed status decision opened after the last `complete`.
 
 A keyed status decision opened after the last `complete` makes `verify` fail, and re-running `complete` is the repair.
 The `--force` path remains the explicit captain-approved discard escape hatch.
-
-Archived evidence is read-only and stricter than a live row.
-The archived row must be the only closed row with that id and must record the captain's own words with a digest matching the recorded ruling, so a missing, unanswered, released, or reconciled archived call still refuses `complete` and `verify`.
-The header of `bin/fm-captain-hold.sh` owns the exact acceptance rules.
 
 ## Cleanup never closes a captain call
 
@@ -146,6 +167,7 @@ After cleanup, and still under the task's own lock, teardown does three things:
 
 - It records one `Deliverable of the finished work: ...` line at the end of the task body.
 - It copies a supported pull request or canonical `data/<id>/report.md` into the row's structured artifact fields.
+  A Gerrit change or GitLab merge request URL is not a pull request tasks-axi accepts, so it appears only in the deliverable line.
 - It runs `tasks-axi reopen`.
 
 The row returns to Queued with its hold intact.
@@ -153,11 +175,12 @@ It remains on the appropriate Captain's Call or Charted Next decision surface in
 
 ### Interrupted cleanup
 
-Teardown already stages a pending-close record before destructive cleanup.
+[`bin/fm-teardown.sh`](../bin/fm-teardown.sh)'s header owns when teardown publishes its pending-close record.
 That record carries the retention intent as a `mode=retain` line.
 An interrupted cleanup therefore replays the retention at the next session start through the same record, validator, and lock as an ordinary close, and never closes the row.
 
 If the captain answers before replay, `answer` validates that record and copies any supported retained pull request or report into the row before closing it.
+A retained Gerrit change or GitLab merge request URL is instead recorded as a `Gerrit change <url>` or `GitLab merge request <url>` note on that close.
 Replay then retires the record.
 
 ### Known retained-delivery gaps
@@ -483,7 +506,7 @@ It then finishes any still-recorded dependency-edge cleanup without rewriting th
 
 ## Verification record
 
-The focused end-to-end regression suite is `tests/fm-captain-hold-lifecycle.test.sh`, using only synthetic `sample` identities and decision text.
+The focused end-to-end regression suite is `tests/fm-captain-hold-lifecycle.test.sh`, using only synthetic identities and decision text.
 It proves the behaviors below.
 The suite does not test the accepted merge-to-cleanup re-hold window or asynchronous queued-forge landing because those events occur after the locally serialized merge command has returned.
 
@@ -520,21 +543,24 @@ The suite does not test the accepted merge-to-cleanup re-hold window or asynchro
 - A report-only unresolved captain call refuses `--none` completion before teardown can erase the source.
 - Non-forced scout teardown always requires the durable inventory verification.
 - The recorded-answer guard holds: a bare `tasks-axi done` close fails `verify` until `answer` records the captain's word, and an ordinary finished task cannot be dressed up as an answered call.
-- An answered or repaired call that Done retention archived still passes `complete` and `verify`, including a pre-collapse record, a ruling that starts with a blank line, and a row an interrupted answer left stamp-first.
-  A missing, unanswered, released, reconciled, digest-mismatched, or wrong-origin archived row refuses both.
+- `test_hold_origins_follow_backend_holds` exercises lookup, backend-hold, and origin-write failures for new, active, and released holds, including secondmate publication and retry deduplication.
+- `test_interrupted_origin_move_does_not_inherit_the_previous_answer` exercises failed restoration, TERM interruption, active and expired holds, earlier-answer replay, and normal released-work completion against the [hold failure semantics](#creating-a-hold-hold) and inventory checks above.
+- An answered call that markdown Done retention moved into the Done archive still passes `verify`, `complete`, and scout teardown, while an archived close carrying no recorded answer still refuses teardown, and an attested call found nowhere is refused by name.
 
 ### Answers, stamps, and deferral
 
 - Answer-time resolution works through a bound channel with task-id keys.
   This includes the `release` mode, mode-matched replay idempotence, and the refusal of drifted, mode-mismatched, absent, unheld, and already-closed keys.
 - The chat channel reaches the same intake.
+- `test_release_is_attended_only` exercises the attended-only release: the away posture record and the away daemon flag each refuse `answer --release` and a `release` intake line without writing, while no record and a quiet record release, and a closing answer is not gated.
 - Hold-set stamping precedes visible hold state, preserves an active lifecycle's timestamp, and resets after release.
 - Interrupted answer closure retains the stamp until close and restores resolution-first ordering on retry.
 - Deferral through `--until` leaves `captain_actionable` false until due.
 
 ### Legacy paths
 
-- Every legacy path works: composed identities through the shim, pre-collapse `decision_keys=` metadata, routed-resolution replay, and a concrete-origin binding.
+- Composed identities through the shim, valid pre-collapse `decision_keys=` inventories, routed-resolution replay, and a concrete-origin binding remain supported.
+  Historical self-inventories require the [documented repair](#recording-a-reviewed-inventory-complete).
 
 ### Task-body read-back cases
 

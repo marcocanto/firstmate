@@ -71,7 +71,7 @@ IFS=$'\t' read -r cmd action id harness model effort <<EOF
 $command_fields
 EOF
 if [ "$cmd" = fm-remote-doctor.sh ]; then
-  printf '%s %s %s\n' "$cmd" "$action" "$id" >> "$FM_FAKE_HOST_LOG"
+  printf '%s %s %s %s %s\n' "$cmd" "$action" "$id" "$harness" "$model" >> "$FM_FAKE_HOST_LOG"
   if [ "$FM_FAKE_DOCTOR_MODE" = omp-missing ]; then
     printf 'check harness_omp=human: omp does not resolve on PATH\n'
     exit 1
@@ -192,7 +192,7 @@ unset FM_FAKE_DOCTOR_MODE
 [ "$RC" -ne 0 ] || fail "an omp relaunch onto a host without omp must not be reported as successful"
 assert_contains "$OUT" "omp does not resolve on PATH" \
   "the readiness check's own message should reach the caller"
-assert_grep 'fm-remote-doctor.sh --harness omp' "$TMP/host.log" \
+assert_grep 'fm-remote-doctor.sh --backend herdr --harness omp' "$TMP/host.log" \
   "the omp readiness check should run on the host"
 assert_no_grep 'fm-remote-secondmate-control.sh' "$TMP/host.log" \
   "a refused omp relaunch must not reach the host-local relaunch that stops the running mate"
@@ -214,10 +214,14 @@ pass "a local secondmate is refused by the remote relaunch tool"
 # --- a relaunch keeps an already-armed PR poll authenticating ---------------
 # fm-pr-check.sh now refuses to arm a poll on a kind=secondmate record, but a
 # record armed before that refusal can still carry the block until the
-# watcher retires it. The fixture is seeded the way such a record was really
-# written: pr= appended last to the meta, then the poll artifacts published
-# through the same fm_pr_poll_prepare/fm_pr_poll_publish_prepared pair
-# fm-pr-check.sh uses, since the refused entry point cannot arm it.
+# watcher retires it. fm-pr-check.sh wrote pr= (and, when a forge head was
+# readable, pr_head=) as the LAST lines of the record, and
+# fm_pr_metadata_identity_parse treats any other key appearing after pr= as
+# invalid, so this wrapper must not append its harness=/model=/effort= lines
+# after that identity block. The fixture is seeded the way such a record was
+# really written: pr= appended last to the meta, then the poll artifacts
+# published through the same fm_pr_poll_prepare/fm_pr_poll_publish_prepared
+# pair fm-pr-check.sh uses, since the refused entry point cannot arm it.
 reset_meta
 printf 'pr=https://github.com/example/repo/pull/1\n' >> "$HOME_DIR/state/ios.meta" \
   || fail "could not write the pr= identity for the relaunch-ordering test"
@@ -232,7 +236,7 @@ fm_pr_poll_artifacts_valid "$HOME_DIR/state" ios "$ROOT/bin/fm-pr-poll.sh" \
 OUT=$(run_relaunch ios claude claude-opus-5-5 medium); RC=$?
 expect_code 0 "$RC" "a confirmed remote relaunch should succeed with an armed PR poll"$'\n'"$OUT"
 fm_pr_poll_artifacts_valid "$HOME_DIR/state" ios "$ROOT/bin/fm-pr-poll.sh" \
-  || fail "a remote relaunch broke PR poll authentication"
+  || fail "a remote relaunch broke PR poll authentication by writing harness/model/effort after pr="
 pass "a remote relaunch keeps an already-armed PR poll authenticating"
 
 echo "ALL TESTS PASSED"

@@ -29,9 +29,11 @@ document:
 # Invocation wiring is asserted by `tests/fm-lint.test.sh` and
 # `tests/fm-lint-workflows.test.sh`.
 #
+# Strict dual-SDK compilation belongs to this compiler-owning phase, not Test.
+# The existing type-regression owner also runs in the required portable CI lane.
 # Keep commands.test absent; the firstmate-coding-guidelines skill owns this policy.
 commands:
-  lint: 'bin/fm-lint.sh'
+  lint: 'bin/fm-lint.sh && bash tests/fm-pi-primary-types.test.sh'
 
 # Test evidence stays on local disk and every run parks for an evidence review before Push and PR.
 # docs/configuration.md "Gate defaults" owns why; the validation-supervision skill owns the review.
