@@ -3522,6 +3522,30 @@ test_merged_poll_row_names_no_authority_when_no_record_grants_one() {
   pass "poll distinguishes attended authorization from external landing"
 }
 
+test_metadata_identity_keeps_earlier_fields_after_pr() {
+  local dir meta url=https://github.com/o/r/pull/7
+  local head=0123456789abcdef0123456789abcdef01234567
+  local trace=00-0123456789abcdef0123456789abcdef-0123456789abcdef-01
+  dir="$TMP_ROOT/meta-identity-after-pr"
+  mkdir -p "$dir"
+  meta="$dir/task.meta"
+
+  printf 'kind=ship\npr=%s\npr_head=%s\ndecisions_reviewed=1\ndecision_keys=\ncontrol_relaunch_tx=tx-1\ntraceparent=%s\n' \
+    "$url" "$head" "$trace" > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && [ "$FM_PR_META_URL" = "$url" ] \
+    || fail "fields an earlier version wrote after pr= invalidated the PR identity"
+
+  printf 'pr=%s\ndecisions_reviewed=1\npr=%s\n' "$url" "$url" > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && fail "a duplicate pr= was accepted"
+  printf 'kind=ship\npr=https://github.com/o/r/issues/7\ndecisions_reviewed=1\n' > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && fail "a malformed PR URL was accepted"
+  printf 'pr=%s\ndecision_keys=\npr_head=not-a-sha\n' "$url" > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && fail "a malformed pr_head= after pr= was accepted"
+  printf 'pr=%s\ndecisions_reviewed=1\nkind=ship\n' "$url" > "$meta"
+  fm_pr_metadata_identity_parse "$meta" && fail "an unknown field after pr= was accepted"
+  pass "task-record PR identity keeps earlier fields after pr= and still rejects duplicates and malformed values"
+}
+
 test_authority_persistence_refuses_rebound_metadata() {
   local dir state url_a url_b rc
   url_a=https://github.com/o/r/pull/1
@@ -4118,6 +4142,7 @@ test_merged_poll_retries_a_failed_upward_report
 test_self_merge_and_poll_publish_one_outcome
 test_merged_poll_row_carries_the_merge_authority
 test_merged_poll_row_names_no_authority_when_no_record_grants_one
+test_metadata_identity_keeps_earlier_fields_after_pr
 test_authority_persistence_refuses_rebound_metadata
 test_authority_persists_before_control_unlock
 test_teardown_cannot_race_authority_consumption

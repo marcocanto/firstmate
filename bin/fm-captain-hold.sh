@@ -160,8 +160,13 @@
 # entry must still satisfy the same durability and origin checks as `complete`,
 # and no keyed status decision may be open.
 # `complete` and `verify` also read an entry that markdown Done retention moved
-# into the configured Done archive, where it counts only through a recorded
-# resolution; no other subcommand reads the archive.
+# into the configured Done archive; no other subcommand reads the archive. An
+# archived row must lead with a resolution record (after at most one `Captain
+# hold set:` stamp an interrupted answer left) in either record format whose
+# mode carries the captain's words (answered, repaired, or routed) and whose
+# digest matches the recorded ruling; when its body names an origin it must
+# name exactly the reviewed one. Missing, unanswered, released, reconciled, or
+# conflicting archived evidence refuses completion and verification.
 # Metadata compatibility: the attestation keeps the historical
 # `decisions_reviewed=1` and `decision_keys=` keys, and an inventory entry that
 # names no existing task resolves through the legacy `<origin>-decision-<entry>`
@@ -536,14 +541,45 @@ resolution_block() {  # <mode>
     "$DECISION_DIGEST" "$1" "$label" "$DECISION_TEXT"
 }
 
+# The answer an archived row must carry. The digest covers the captain ruling,
+# not the previous body appended below it. Test line-boundary prefixes so
+# multi-line rulings retain their bytes.
+verify_archived_answer() {  # <origin> <task-id>; reads TASK_SHOW_OUTPUT
+  local origin=$1 id=$2 body mode
+  body=$(decode_shown_value "$(show_field "$TASK_SHOW_OUTPUT" body)") \
+    || fail "could not decode the archived body of $id"
+  if ! mode=$(printf '%s' "$body" | perl -MDigest::SHA=sha256_hex -e '
+    local $/;
+    my $body = <STDIN>;
+    my ($origin) = @ARGV;
+    my @origins = $body =~ /^Origin: (.+)$/mg;
+    exit 1 if @origins && (@origins != 1 || $origins[0] ne $origin);
+    $body =~ /\A(?:Captain hold set: \d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}Z)?\n\n)?Resolution recorded by fm-(?:captain|decision)-hold\.\nDecision digest: ([0-9a-f]{64})\n(?:Routed identities: [^\n]*\n)?Resolution mode: ([^\n]+)\n\nCaptain decision:\n(.+)\z/s
+      or exit 1;
+    my ($digest, $mode, $rest) = ($1, $2, $3);
+    my @lines = split /\n/, $rest, -1;
+    for my $last (0 .. $#lines) {
+      my $answer = join("\n", @lines[0 .. $last]);
+      if (length($answer) && sha256_hex($answer) eq $digest) {
+        print $mode;
+        exit 0;
+      }
+    }
+    exit 1;
+  ' "$origin") || ! closed_answer_replay_mode_compatible "$mode" "$body"; then
+    fail "archived captain-held task $id has no answered resolution with a matching decision digest and origin"
+  fi
+}
+
 # Durable state of one captain call: an active captain hold (annotations
 # surviving even when a date gate has expired) or a recorded captain answer.
 # Without captain annotations, an open task's leading stamp can signal an
 # incomplete re-hold or unfinished release normalization; the old record alone
 # cannot vouch for that state. Done tasks retain their recorded resolution as
-# evidence, and verify_entry_durable separately checks the stored origin.
-verify_hold_durable() {  # <task-id>
-  local id=$1 show state hold_kind body archived_status
+# evidence, and verify_entry_durable separately checks the stored origin. A row
+# only the Done archive still holds must carry the captain's own answer.
+verify_hold_durable() {  # <origin> <task-id>
+  local origin=$1 id=$2 show state hold_kind body archived_status
   task_show "$id" || {
     [ "$?" -ne 124 ] || fail "the backlog backend exceeded its read bound reading $id"
     task_show_archived "$id" || {
@@ -551,6 +587,8 @@ verify_hold_durable() {  # <task-id>
       [ "$archived_status" -ne 124 ] || exit 124
       fail "captain-held task $id is absent from this home's configured backlog (data directory $DATA)"
     }
+    verify_archived_answer "$origin" "$id"
+    return 0
   }
   show=$TASK_SHOW_OUTPUT
   state=$(show_field "$show" state)
@@ -912,8 +950,8 @@ refuse_self_inventory() {
 # Done retention moves closed markdown rows into the configured archive, which
 # tasks-axi show never reads, so an answered call a scout attested would read as
 # absent once retention ran. Only the completion gate consults the archive: an
-# archived row is closed, so it can satisfy the gate solely through a recorded
-# resolution, and every mutating path keeps seeing it as absent.
+# archived row is closed, so it can satisfy the gate solely through the
+# captain's recorded answer, and every mutating path keeps seeing it as absent.
 
 # The [markdown] archive key tasks-axi would honour, resolved with tasks-axi's
 # own source precedence: the backlog root's .tasks.toml first, then the
@@ -1061,7 +1099,7 @@ verify_entry_durable() {  # <origin-or-empty> <entry>; prints "<id> <how> <origi
   fi
   id=${resolved%% *}
   how=${resolved##* }
-  verify_hold_durable "$id"
+  verify_hold_durable "$origin" "$id"
   id=$(show_field_value "$TASK_SHOW_OUTPUT" id)
   validate_slug backend-task-id "$id"
   stored=$(body_hold_origin "$(decode_shown_value "$(show_field "$TASK_SHOW_OUTPUT" body)")")

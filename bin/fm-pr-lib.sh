@@ -486,8 +486,10 @@ fm_pr_metadata_identity_parse() {
           fm_pr_head_valid "$value" || post_pr_invalid=1
         fi
         ;;
-      control_relaunch_tx=*|x_request=*|x_request_ts=*|x_followups=*|x_platform=*|x_reply_max_chars=*)
-        # Lifecycle and relay fields may be appended after the PR identity.
+      control_relaunch_tx=*|decisions_reviewed=*|decision_keys=*|traceparent=*|x_request=*|x_request_ts=*|x_followups=*|x_platform=*|x_reply_max_chars=*)
+        # Lifecycle and relay fields may be appended after the PR identity, and
+        # records written by earlier versions keep their completion pair and
+        # trace carrier there.
         ;;
       *)
         [ "$seen_pr" -eq 0 ] || post_pr_invalid=1
