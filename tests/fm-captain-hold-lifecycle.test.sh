@@ -5096,7 +5096,7 @@ EOF
 
 test_archived_captain_call_inventory() {
   local home origin=sample-archive-review id=sample-archive-call variant out body
-  for variant in answered blank-first stamp-first existing repaired released reconciled unanswered digest origin missing; do
+  for variant in answered blank-first stamp-first existing repaired moved ruling-origin released reconciled unanswered digest origin creation-origin missing; do
     home=$(make_home "archive-$variant")
     cat > "$home/.tasks.toml" <<'EOF'
 backend = "markdown"
@@ -5112,6 +5112,12 @@ EOF
           || fail "could not create the existing work item"
         run_captain "$home" hold "$id" --reason "captain choice pending" >/dev/null \
           || fail "could not hold the existing work item"
+      elif [ "$variant" = moved ]; then
+        run_captain "$home" hold "$id" --title "Choose the sample option" \
+          --reason "captain choice pending" --origin sample-earlier-review >/dev/null \
+          || fail "could not create the moved call"
+        run_captain "$home" hold "$id" --reason "captain choice moved" --origin "$origin" >/dev/null \
+          || fail "could not move the call to the reviewed origin"
       else
         run_captain "$home" hold "$id" --title "Choose the sample option" \
           --reason "captain choice pending" --origin "$origin" >/dev/null \
@@ -5120,6 +5126,8 @@ EOF
       printf 'Use the sample option.\nKeep the recorded constraint.\n' > "$home/answer.txt"
       [ "$variant" != blank-first ] \
         || printf '\nUse the sample option.\nKeep the recorded constraint.\n' > "$home/answer.txt"
+      [ "$variant" != ruling-origin ] \
+        || printf 'Use the sample option.\nOrigin: sample-other-review\n' > "$home/answer.txt"
       case "$variant" in
         repaired)
           tasks_in "$home" "done" "$id" >/dev/null || fail "could not close the repaired fixture"
@@ -5148,20 +5156,27 @@ EOF
           ;;
       esac
       case "$variant" in
-        digest|origin|stamp-first)
+        digest|origin|creation-origin|stamp-first)
           body=$(tasks_in "$home" show "$id" --full | sed -n 's/^  body: //p')
           body=$(printf '%s' "$body" | perl -MJSON::PP -e \
             'local $/; print JSON::PP->new->allow_nonref->decode(<STDIN>)')
           case "$variant" in
             digest) body=${body/Use the sample option./Use a different option.} ;;
-            origin) body=${body/Origin: $origin/Origin: sample-other-review} ;;
+            origin)
+              body=${body/Origin: $origin/Origin: sample-other-review}
+              body=${body/Captain hold origin: $origin/Captain hold origin: sample-other-review}
+              ;;
+            creation-origin)
+              body=$(printf '%s\n' "$body" | grep -v '^Captain hold origin: ')
+              body=${body/Origin: $origin/Origin: sample-other-review}
+              ;;
             *) body=$(printf 'Captain hold set: 2026-09-01T00:00:00Z\n\n%s' "$body") ;;
           esac
           tasks_in "$home" update "$id" --body "$body" >/dev/null \
             || fail "could not change the archive evidence"
           ;;
       esac
-      case "$variant" in answered|blank-first|stamp-first|existing|repaired)
+      case "$variant" in answered|blank-first|stamp-first|existing|repaired|moved|ruling-origin)
         run_captain "$home" complete "$origin" "$id" >/dev/null \
           || fail "the live $variant call did not complete"
         run_captain "$home" verify "$origin" >/dev/null \
@@ -5178,13 +5193,20 @@ EOF
         "tasks-axi did not retain the closed row"
     fi
     case "$variant" in
-      answered|blank-first|stamp-first|existing|repaired)
+      answered|blank-first|stamp-first|existing|repaired|moved|ruling-origin)
         out=$(run_captain "$home" verify "$origin" 2>&1) \
           || fail "retention blocked verification of the $variant call: $out"
         assert_contains "$out" "verified: $origin" "the retained inventory did not verify"
         out=$(run_captain "$home" complete "$origin" "$id" 2>&1) \
           || fail "retention blocked completion of the $variant call: $out"
         assert_contains "$out" "complete: $origin" "the archived call did not complete"
+        if [ "$variant" = moved ]; then
+          write_origin_meta "$home" sample-earlier-review
+          printf 'decisions_reviewed=1\ndecision_keys=%s\n' "$id" >> "$home/state/sample-earlier-review.meta"
+          if out=$(run_captain "$home" verify sample-earlier-review 2>&1); then
+            fail "the origin the call moved away from verified it: $out"
+          fi
+        fi
         ;;
       *)
         if out=$(run_captain "$home" complete "$origin" "$id" 2>&1); then

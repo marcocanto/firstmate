@@ -114,7 +114,7 @@ An expired deferral therefore remains answerable.
 
 ### Recording a reviewed inventory (`complete`)
 
-While originating task metadata is live, the `complete` subcommand unions the reviewed captain-held task ids, called the reviewed inventory, into `decision_keys=` and records `decisions_reviewed=1`, replacing any earlier pair and writing it once ahead of any armed `pr=` merge-poll identity lines, because the metadata identity parse refuses these keys after `pr=`.
+While originating task metadata is live, the `complete` subcommand unions the reviewed captain-held task ids, called the reviewed inventory, into `decision_keys=` and records `decisions_reviewed=1`, replacing any earlier pair and writing it once ahead of any armed `pr=` merge-poll identity lines, so those lines stay last in the record; the metadata identity parse still accepts these keys after `pr=` so records written by earlier versions keep their identity.
 A post-teardown visual review can complete against the surviving report and durable tasks without recreating volatile task metadata.
 The [lifecycle policy](../.agents/skills/captain-hold-lifecycle/SKILL.md#policy) assigns caller authority, including the scout's brief-scoped exception for an empty inventory.
 `tests/fm-brief.test.sh` pins that the scout brief's outside-worktree rule names exactly that `complete --none` command, so the write boundary and the completion step cannot drift apart again.
@@ -125,7 +125,9 @@ Before recording completion, `complete` verifies every listed task against tasks
 A durable entry is an open task with captain-hold annotations (including a date-expired hold), or a task carrying a recorded resolution.
 For an open task without those annotations, a leading hold-set stamp above the resolution is refused: the answer alone cannot establish durability while the hold or release normalization is incomplete.
 A Done task still requires a recorded resolution, but is not subject to that stamp refusal.
-An answered entry that markdown Done retention moved into the configured Done archive still counts, while an archived close with no recorded answer does not.
+An answered entry that markdown Done retention moved into the configured Done archive still counts only through the captain's own answer: its body must lead with a resolution record whose mode is answered, repaired, or routed and whose digest matches the recorded ruling.
+An archived close with no recorded answer does not count, and neither does a released, reconciled, digest-mismatched, or origin-mismatched archived row.
+Below the ruling, a `Captain hold origin:` line must identify the reviewed origin; without one, a creation-time `Origin:` line must name exactly the reviewed origin.
 The origin is never its own inventory entry, so a hold that failed cannot be vouched for by the origin row.
 For a historical inventory that names its own origin, hold a separate captain task with `--origin`, replace only the invalid entry in the final `decision_keys=` line of the origin metadata with that task id while preserving all other entries, and re-run `complete`.
 An entry whose recorded origin differs from the one being completed is refused, comparing backend identities rather than alias spellings.
@@ -545,7 +547,7 @@ The suite does not test the accepted merge-to-cleanup re-hold window or asynchro
 - The recorded-answer guard holds: a bare `tasks-axi done` close fails `verify` until `answer` records the captain's word, and an ordinary finished task cannot be dressed up as an answered call.
 - `test_hold_origins_follow_backend_holds` exercises lookup, backend-hold, and origin-write failures for new, active, and released holds, including secondmate publication and retry deduplication.
 - `test_interrupted_origin_move_does_not_inherit_the_previous_answer` exercises failed restoration, TERM interruption, active and expired holds, earlier-answer replay, and normal released-work completion against the [hold failure semantics](#creating-a-hold-hold) and inventory checks above.
-- An answered call that markdown Done retention moved into the Done archive still passes `verify`, `complete`, and scout teardown, while an archived close carrying no recorded answer still refuses teardown, and an attested call found nowhere is refused by name.
+- An answered call that markdown Done retention moved into the Done archive still passes `verify`, `complete`, and scout teardown, including after an origin move, while an archived close carrying no recorded answer still refuses teardown, released, reconciled, digest-mismatched, and origin-mismatched archived rows refuse `verify` and `complete`, and an attested call found nowhere is refused by name.
 
 ### Answers, stamps, and deferral
 
