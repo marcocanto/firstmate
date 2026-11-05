@@ -51,8 +51,12 @@ REMOTE_HOST=$(fm_meta_get "$META" remote_host)
 # The host-local relaunch stops the running agent before it launches the
 # replacement, so an omp host gap must refuse here, while the mate still runs.
 if [ "$HARNESS" = omp ]; then
+  # A record written before rex existed carries no remote_backend; that
+  # endpoint is herdr.
+  REMOTE_BACKEND=$(fm_meta_get "$META" remote_backend)
+  [ -n "$REMOTE_BACKEND" ] || REMOTE_BACKEND=herdr
   rc=0
-  fm_remote_readiness_ensure "$SCRIPT_DIR" "$ID" "$HARNESS" || rc=$?
+  fm_remote_readiness_ensure "$SCRIPT_DIR" "$ID" "$REMOTE_BACKEND" "$HARNESS" || rc=$?
   if [ "$rc" -ne 0 ]; then
     if [ "$rc" -eq 255 ]; then
       printf 'error: remote secondmate %s readiness could not be confirmed; relaunch not attempted\n' "$ID" >&2
@@ -97,7 +101,12 @@ META_TMP=$(mktemp "$STATE/.fm-remote-relaunch-meta.XXXXXX") || {
   printf 'effort=%s\n' "$NEW_EFFORT"
 } >> "$META_TMP"
 # Every other line is preserved in its original relative order after the
-# refreshed harness/model/effort.
+# refreshed harness/model/effort. A pr= line's own identity region (pr_head=
+# and the lifecycle, completion, trace, and relay fields
+# fm_pr_metadata_identity_parse allows after it) must stay LAST in the record:
+# that parser rejects any other key following pr=, so writing
+# harness/model/effort after it would break PR movement monitoring on a task
+# that already had one armed.
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
     harness=*|model=*|effort=*) ;;

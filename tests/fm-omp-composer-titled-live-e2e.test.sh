@@ -120,7 +120,7 @@ titled_shape_visible() {
     d=$(printf '%s\n' "$rows" | sed -n "$((i + 3))p"); fm_composer_normalize_trim_var d
     case "$a" in *"$TITLE"*) ;; *) i=$((i + 1)); continue ;; esac
     case "$b" in '❯'*) ;; *) i=$((i + 1)); continue ;; esac
-    if _fm_composer_titled_rule_row "$a" && _fm_composer_pi_separator_row "$c" \
+    if _fm_composer_omp_titled_rule_row "$a" && _fm_composer_pi_separator_row "$c" \
        && _fm_composer_row_is_omp_status "$d"; then
       return 0
     fi

@@ -2,29 +2,40 @@
 # Check, and optionally repair, one remote account's second-mate readiness.
 #
 # Usage:
-#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix|--replace-server] [--harness omp]
+#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix|--replace-server] [--backend herdr|rex|any] [--harness omp]
 #
 # Run it through fm-on.sh so the fixed entrypoint invokes this readiness owner
 # over its plain SSH bootstrap. The command reports the same filesystem-composed
 # PATH used by worker jobs while retaining authority to inspect and repair the
 # worker itself.
 #
-# A remote second mate always runs on the Herdr backend in the dedicated
-# fm-remote session. Its account therefore needs the Firstmate-owned Aqua Herdr
-# agent plus the sibling dev.firstmate.remote-job worker that runs normal fm-on
-# commands through the Aqua or Linux job-worker path. On darwin, that Herdr
-# agent runs bin/fm-remote-herdr-launch.sh through the remote account's login
-# shell (`-l -c`) so the server inherits the account's environment. The
-# gui/<uid> domain supplies the Aqua audit session and login-keychain access.
-# The launcher uses Perl POSIX to detach the Unix session with the same PID,
-# then execs the guard, which execs Herdr under launchd. The guard leaves an
+# A remote second mate runs on one session-provider backend: herdr (the
+# default) in the dedicated fm-remote session, or rex on the host's own
+# persistent rex server in a 2ndmate-<id>-<hash> session. --backend names the
+# one to verify; the default `any` resolves herdr when its CLI is present, then
+# rex, so a host offering both is still verified for the default backend. On
+# the Herdr backend the account needs the Firstmate-owned Aqua Herdr agent plus
+# the sibling dev.firstmate.remote-job worker that runs normal fm-on commands
+# through the Aqua or Linux job-worker path. On darwin, that Herdr agent runs
+# bin/fm-remote-herdr-launch.sh through the remote account's login shell
+# (`-l -c`) so the server inherits the account's environment. The gui/<uid>
+# domain supplies the Aqua audit session and login-keychain access. The
+# launcher uses Perl POSIX to detach the Unix session with the same PID, then
+# execs the guard, which execs Herdr under launchd. The guard leaves an
 # Aqua-born server alone and takes over every other owner.
 # bin/fm-remote-herdr-owner-lib.sh owns the birth test. Second-mate readiness
 # needs only Aqua birth on darwin. The detached_server_daemon capability that
 # Herdr saved machines need is the separate, non-blocking saved-machine check.
-# Doctor remains invokable over the plain-SSH bootstrap path to repair the worker.
-# SSH cannot create an Aqua session, so a host with no GUI login is a human
-# gap rather than something --fix attempts to bypass.
+# On the Rex backend the account instead needs a rex CLI and a persistent
+# `rex server start` server on the account's personal unix socket, which is
+# detached from every SSH session; --fix may run `rex server start` when no
+# server answers, but never installs the CLI and never stops or restarts an
+# answering server: an exit-when-empty server is a human gap that needs an
+# operator-scheduled restart. The remote job worker is backend-independent, so
+# its Aqua login-session requirement is checked under either backend. Doctor
+# remains invokable over the plain-SSH bootstrap path to inspect and repair that
+# worker. SSH cannot create an Aqua session, so a host with no GUI login is a
+# human gap rather than something --fix attempts to bypass.
 #
 # --harness omp names the runtime the second mate will launch on and adds that
 # runtime's own check: the omp CLI must resolve on the runtime PATH, because the
@@ -60,7 +71,8 @@
 #
 # --fix is idempotent and closes only automatable gaps: it writes and reloads
 # both Firstmate-owned Aqua agents, starts the Linux workers where no Aqua agent
-# applies, recreates the entrypoint symlink, and may add an owned ~/.local/bin
+# applies, starts a persistent rex server when that backend needs one and none
+# answers, recreates the entrypoint symlink, and may add an owned ~/.local/bin
 # wrapper for a required tool it can discover under nvm, asdf, or mise. It never
 # installs packages, creates a login session, writes an auto-login password,
 # changes FileVault, stores an account password, or replaces a non-Firstmate
@@ -90,9 +102,15 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(CDPATH='' cd "$SCRIPT_DIR/.." && pwd -P)}"
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-remote-herdr-owner-lib.sh
 . "$SCRIPT_DIR/fm-remote-herdr-owner-lib.sh"
-REQUIRED_TOOLS=(git jq herdr tasks-axi treehouse)
+# The shared remote toolchain plus the selected backend's CLI; the backend slot
+# is filled once the backend is resolved below, and darwin adds perl for the
+# same-PID Herdr launcher.
+REQUIRED_TOOLS=()
 HARNESS_TOOLS=(claude codex opencode pi pi-signed grok kimi omp)
 OPTIONAL_TOOLS=(tmux no-mistakes gh)
+# The server API revision Firstmate's rex adapter is verified against
+# (bin/backends/rex.sh's FM_BACKEND_REX_MIN_API).
+REX_MIN_API=5
 LAUNCH_AGENT_LABEL=dev.firstmate.herdr.fm-remote
 # The dedicated remote-secondmate session. The user's interactive Herdr work
 # remains in the separate default session, which this readiness check never
@@ -107,6 +125,7 @@ ENTRYPOINT_LINK="${HOME:-}/.local/bin/fm-remote-entrypoint.sh"
 usage() { sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 MODE=check
+DOCTOR_BACKEND=any
 SELECTED_HARNESS=
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -117,6 +136,13 @@ while [ "$#" -gt 0 ]; do
     --replace-server)
       [ "$MODE" = check ] || usage
       MODE=replace-server
+      ;;
+    --backend)
+      shift
+      case "${1:-}" in herdr | rex | any) DOCTOR_BACKEND=$1 ;; *) usage ;; esac
+      ;;
+    --backend=*)
+      case "${1#--backend=}" in herdr | rex | any) DOCTOR_BACKEND=${1#--backend=} ;; *) usage ;; esac
       ;;
     --worker-tool-probe)
       [ "${FM_REMOTE_JOB_ACTIVE:-}" = 1 ] || { printf 'error: worker tool probe requires the remote job worker\n' >&2; exit 64; }
@@ -135,6 +161,25 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+# Resolve which backend this run is responsible for before any check or tool
+# list is derived: an explicit --backend wins, and `any` picks herdr when its
+# CLI resolves (the default backend), then rex, so a host offering both is
+# verified for the default. `none` means no supported backend CLI resolves and
+# is reported as one backend gap rather than two tool gaps.
+if [ "$DOCTOR_BACKEND" = any ]; then
+  if command -v herdr >/dev/null 2>&1; then
+    DOCTOR_BACKEND=herdr
+  elif command -v rex >/dev/null 2>&1; then
+    DOCTOR_BACKEND=rex
+  else
+    DOCTOR_BACKEND=none
+  fi
+fi
+case "$DOCTOR_BACKEND" in
+  herdr | rex) REQUIRED_TOOLS=(git jq "$DOCTOR_BACKEND" tasks-axi treehouse) ;;
+  *) REQUIRED_TOOLS=(git jq backend tasks-axi treehouse) ;;
+esac
 
 PLATFORM=$(fm_remote_job_platform)
 [ "$PLATFORM" != darwin ] || REQUIRED_TOOLS+=(perl)
@@ -499,10 +544,19 @@ report_required_tools() {
 # accepted facts are exactly REQUIRED_TOOLS for this platform plus harness.
 report_required_tools_from_worker() {
   local job_id probe_stdout probe_stderr probe_exit line fact name value
-  local accepted=" ${REQUIRED_TOOLS[*]} harness " expected=$((${#REQUIRED_TOOLS[@]} + 1))
+  # Every backend slot name stays acceptable, as the probe may report its
+  # backend fact under herdr, rex, or the backend placeholder.
+  local accepted=" ${REQUIRED_TOOLS[*]} herdr rex backend harness " expected=$((${#REQUIRED_TOOLS[@]} + 1))
   local count=0 valid=1 seen=' '
+  # The probe recomputes the same backend selection in the worker's own PATH:
+  # an explicit selection is passed through, while `none` stays unflagged so the
+  # probe reports `backend=MISSING` rather than resolving differently.
+  local -a probe_args=(--worker-tool-probe)
+  case "$DOCTOR_BACKEND" in
+    herdr | rex) probe_args+=(--backend "$DOCTOR_BACKEND") ;;
+  esac
   if ! job_id=$(fm_remote_job_stage "${HOME:-}" "$FM_ROOT" "${FM_HOME:-}" \
-    fm-remote-doctor.sh --worker-tool-probe </dev/null); then
+    fm-remote-doctor.sh "${probe_args[@]}" </dev/null); then
     set_check remote-job-probe "fixable: the remote job worker could not accept the required-tool probe" \
       "rerun this command with --fix to restart the worker"
     report_required_tools
@@ -627,7 +681,135 @@ check_herdr() {
     return 0
   fi
   record herdr "human: the herdr CLI does not resolve on the remote runtime PATH" \
-    "install herdr from https://herdr.dev on that account, or add a ~/.local/bin wrapper for it; a remote second mate always runs on the Herdr backend"
+    "install herdr from https://herdr.dev on that account, or add a ~/.local/bin wrapper for it; the remote second mate's herdr backend needs this CLI"
+}
+
+# Reported only when no supported backend CLI resolves at all: one session-
+# provider gap rather than one gap per missing CLI.
+check_backend() {
+  record backend "human: neither the herdr nor the rex CLI resolves on the remote runtime PATH" \
+    "install herdr from https://herdr.dev or Rex on that account, or add a ~/.local/bin wrapper for one; a remote second mate needs one session-provider backend"
+}
+
+# Rex server calls below read through a resolved rex CLI that can never
+# autostart: the doctor's job is the existing server's state, and a lazy
+# autostart would silently satisfy the persistent-server check with an
+# exit-empty server.
+rex_bin() {
+  command -v rex 2>/dev/null
+}
+
+rex_server_status_json() {
+  local rex
+  rex=$(rex_bin) || return 1
+  "$rex" --autostart=false api call server.status 2>/dev/null
+}
+
+rex_whoami_json() {
+  local rex
+  rex=$(rex_bin) || return 1
+  "$rex" --autostart=false whoami --json 2>/dev/null
+}
+
+check_rex() {
+  local rex raw client_api
+  if ! rex=$(rex_bin) || [ ! -x "$rex" ]; then
+    record rex "human: the rex CLI does not resolve on the remote runtime PATH" \
+      "install Rex on that account, or add a ~/.local/bin wrapper for it; the remote second mate's rex backend needs this CLI"
+    return 0
+  fi
+  raw=$("$rex" version 2>/dev/null || true)
+  client_api=$(printf '%s\n' "$raw" | sed -n 's/^api: revision \([0-9][0-9]*\).*/\1/p' | head -1)
+  case "$client_api" in
+    '' | *[!0-9]*)
+      record rex "human: the rex CLI at $rex reports no parsable API revision; Firstmate refuses an unverified build" \
+        "install a Rex build whose 'rex version' reports 'api: revision N' with N >= $REX_MIN_API, then rerun this command"
+      ;;
+    *)
+      if [ "$client_api" -lt "$REX_MIN_API" ]; then
+        record rex "human: the rex CLI at $rex speaks API revision $client_api, older than the verified minimum $REX_MIN_API" \
+          "update Rex on that account, then rerun this command"
+      else
+        record rex "ok: $rex (API revision $client_api)"
+      fi
+      ;;
+  esac
+}
+
+check_rex_server() {
+  local status whoami endpoint exit_empty server_api
+  if ! rex_bin >/dev/null || ! command -v jq >/dev/null 2>&1; then
+    record rex-server "human: rex server status cannot be read without both rex and jq on the runtime PATH" \
+      "install the missing tool reported above, then rerun this command"
+    return 0
+  fi
+  if ! status=$(rex_server_status_json); then
+    record rex-server "fixable: no rex server answers on this account's personal socket" \
+      "rerun this command with --fix to start a persistent rex server"
+    return 0
+  fi
+  server_api=$(printf '%s' "$status" | jq -r '.api_revision // empty' 2>/dev/null)
+  case "$server_api" in
+    '' | *[!0-9]*)
+      record rex-server "human: the running rex server reports no parsable API revision; Firstmate refuses an unverified build" \
+        "update Rex on that account, then rerun this command"
+      return 0
+      ;;
+  esac
+  if [ "$server_api" -lt "$REX_MIN_API" ]; then
+    record rex-server "human: the running rex server speaks API revision $server_api, older than the verified minimum $REX_MIN_API" \
+      "update Rex on that account, then rerun this command"
+    return 0
+  fi
+  if ! whoami=$(rex_whoami_json); then
+    record rex-server "human: the rex server's settings could not be read" \
+      "run 'rex whoami --json' on that account and report the failure"
+    return 0
+  fi
+  endpoint=$(printf '%s' "$whoami" | jq -r '.endpoint // empty' 2>/dev/null) || endpoint=
+  case "$endpoint" in
+    unix://*) ;;
+    '')
+      record rex-server "human: the rex server's endpoint could not be read" \
+        "run 'rex whoami --json' on that account and report the failure"
+      return 0
+      ;;
+    *)
+      record rex-server "human: the rex server endpoint '$endpoint' is not a local unix socket; remote second mates stay on the account's personal unix:// server" \
+        "reconfigure that account's rex to serve the default unix:// endpoint, then rerun this command"
+      return 0
+      ;;
+  esac
+  exit_empty=$(printf '%s' "$whoami" | jq -r '.exit_empty | select(type == "boolean")' 2>/dev/null) || exit_empty=
+  if [ "$exit_empty" = true ]; then
+    record rex-server "human: the rex server at $endpoint exits when empty, so a second mate's session would not survive an idle stretch" \
+      "at a time when nothing runs on that account's rex server, run 'rex server stop' and then 'rex server start' there to bring it back as a persistent server, then rerun this command; Firstmate never stops an answering server, because that ends every process in its sessions"
+    return 0
+  fi
+  if [ "$exit_empty" != false ]; then
+    record rex-server "human: the rex server at $endpoint reports no explicit boolean exit_empty=false; persistence is unproven" \
+      "run 'rex whoami --json' on that account and resolve the missing or malformed exit_empty setting, then rerun this command"
+    return 0
+  fi
+  record rex-server "ok: persistent rex server on $endpoint (API revision $server_api)"
+}
+
+# A persistent rex server is `rex server start`, detached from every SSH
+# session. This repair runs only when no server answers; an answering server is
+# never stopped or restarted here, because stopping it ends every process in
+# its sessions and restoring them brings back shells, not that work.
+start_rex_server() {
+  local rex
+  rex=$(rex_bin) || {
+    fix_report rex-server failed "rex does not resolve, so no server was started"
+    return 1
+  }
+  if "$rex" server start >/dev/null 2>&1; then
+    fix_report rex-server applied "started a persistent rex server"
+    return 0
+  fi
+  fix_report rex-server failed "a persistent rex server did not come up"
+  return 1
 }
 
 # The selected omp runtime must resolve on this PATH, which the host-local
@@ -827,12 +1009,24 @@ run_checks() { # <resolved-login-shell>
   CHECK_NAMES=()
   CHECK_VALUES=()
   CHECK_ACTIONS=()
-  check_herdr
+  case "$DOCTOR_BACKEND" in
+    herdr) check_herdr ;;
+    rex) check_rex ;;
+    *) check_backend ;;
+  esac
   check_gui_session
   check_remote_job_worker
-  check_launch_agent "$shell"
-  check_herdr_server
-  check_saved_machine
+  # Backend infrastructure is checked only for the selected backend: herdr
+  # needs the Aqua-owned fm-remote server, rex needs a persistent personal rex
+  # server, and the no-backend gap has nothing further to prove.
+  case "$DOCTOR_BACKEND" in
+    herdr)
+      check_launch_agent "$shell"
+      check_herdr_server
+      check_saved_machine
+      ;;
+    rex) check_rex_server ;;
+  esac
   check_entrypoint_link
   check_omp
 }
@@ -1019,6 +1213,7 @@ apply_fixes() { # <resolved-login-shell>
         fi
         start_herdr_server || true
         ;;
+      rex-server) start_rex_server || true ;;
       entrypoint-link) link_entrypoint || true ;;
       omp) repair_tool_wrapper omp || true ;;
     esac
