@@ -164,11 +164,11 @@
 # archived row must lead with a resolution record (after at most one `Captain
 # hold set:` stamp an interrupted answer left) in either record format whose
 # mode carries the captain's words (answered, repaired, or routed) and whose
-# digest matches the recorded ruling. Below the ruling, a `Captain hold origin:`
-# line must identify the reviewed origin; without one, a creation-time `Origin:`
-# line must name exactly the reviewed origin. Missing, unanswered, released,
-# reconciled, or conflicting archived evidence refuses completion and
-# verification.
+# digest matches the recorded ruling. A `Captain hold origin:` line must identify
+# the reviewed origin; when none sits below the ruling, a creation-time `Origin:`
+# line there must name exactly the reviewed origin. Missing, unanswered,
+# released, reconciled, digest-mismatched, or origin-mismatched archived rows
+# refuse completion and verification.
 # Metadata compatibility: the attestation keeps the historical
 # `decisions_reviewed=1` and `decision_keys=` keys, and an inventory entry that
 # names no existing task resolves through the legacy `<origin>-decision-<entry>`
@@ -545,9 +545,10 @@ resolution_block() {  # <mode>
 
 # The answer an archived row must carry. The digest covers the captain ruling,
 # not the previous body appended below it. Test line-boundary prefixes so
-# multi-line rulings retain their bytes. Origins are read below the ruling, so
-# the captain's words never name one, and a `Captain hold origin:` line, which
-# verify_entry_durable enforces, supersedes the creation-time `Origin:` line.
+# multi-line rulings retain their bytes. Released, reconciled, digest-mismatched,
+# and origin-mismatched rows refuse. `Origin:` is read below the ruling, so the
+# captain's words never trip it, and a `Captain hold origin:` line there, which
+# verify_entry_durable enforces, supersedes it.
 verify_archived_answer() {  # <origin> <task-id>; reads TASK_SHOW_OUTPUT
   local origin=$1 id=$2 body mode
   body=$(decode_shown_value "$(show_field "$TASK_SHOW_OUTPUT" body)") \
