@@ -294,13 +294,12 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
 # Acts on a `relaunchable` probe verdict for <id>: takes the per-home relaunch
 # lock, records the attempt, kills a confirmed-dead local endpoint if required
 # (FM_SM_LIVE_KILL), runs the guarded spawn, then records its outcome.
-# An explicit [backend] is a deliberate move (bin/fm-secondmate-move.sh): the
-# respawn is passed `--backend <backend>` in place of the recorded backend. It
-# is refused for a remote mate before any attempt is recorded, because a remote
-# mate's backend belongs to its host. A move never resumes in place: a T3
-# resume becomes a kill that must prove the thread archived before the
-# respawn on the target. Without it a local mate is respawned on its recorded
-# backend.
+# An explicit [backend] is a deliberate move (bin/fm-secondmate-move.sh, which
+# refuses a remote mate before calling this): the respawn is passed
+# `--backend <backend>` in place of the recorded backend. A move never resumes
+# in place: a T3 resume becomes a kill that must prove the thread archived
+# before the respawn on the target. Without it a local mate is respawned on
+# its recorded backend.
 # On t3code a close that cannot be proven stops there: the thread and its
 # metadata stay as recorded, the verdict becomes skipped, and nothing is
 # spawned, because a second thread beside a live one is the duplicate
@@ -318,12 +317,6 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
 fm_secondmate_liveness_relaunch() {  # <meta> <id> [timeout-secs] [backend]
   local meta=$1 id=$2 timeout=${3:-} move_backend=${4:-} relaunch_lock wait_seconds rc=0
   FM_SM_LIVE_OUT='' FM_SM_LIVE_RC=0
-  if [ -n "$move_backend" ] && [ -n "$(fm_meta_get "$meta" remote_host)" ]; then
-    FM_SM_LIVE_STATUS=skipped
-    FM_SM_LIVE_REASON="secondmate $id is placed on remote host $(fm_meta_get "$meta" remote_host), whose backend is its own; a local move is refused"
-    FM_SM_LIVE_RC=1
-    return 1
-  fi
   if [ -n "$move_backend" ] && [ "$FM_SM_LIVE_RESUME" = 1 ]; then
     FM_SM_LIVE_RESUME=0 FM_SM_LIVE_KILL=1
   fi

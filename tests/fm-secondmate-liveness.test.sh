@@ -1134,10 +1134,11 @@ test_move_relaunches_an_already_stopped_tmux_secondmate_on_hc() {
   pass "move: an already-stopped tmux secondmate is relaunched on hc without lifecycle input"
 }
 
-# add_move_remote_dead <w>: places sm1 on a remote host whose stubbed state
-# probe reports the agent dead, so the move reaches the relaunch step.
-add_move_remote_dead() {
-  local w=$1 sshbin
+# add_move_remote <w> <state>: places sm1 on a remote host whose stubbed state
+# probe reports <state>; every ssh call is logged, so a refusal that never
+# contacts the host leaves ssh.log empty.
+add_move_remote() {  # <w> <remote agent state the host reports>
+  local w=$1 remote_state=$2 sshbin
   printf 'remote_host=lab-host\nremote_backend=herdr\nremote_herdr_session=fm-remote\nremote_target=fm-remote:w1:p1\n' >> "$w/home/state/sm1.meta"
   mkdir -p "$w/home/data"
   printf -- '- sm1 - Remote mate (host: lab-host; root: /remote/root; home: /remote/sm1-home; scope: remote work; projects: alpha; added 2026-01-01)\n' \
@@ -1146,7 +1147,7 @@ add_move_remote_dead() {
   cat > "$sshbin/ssh" <<SH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> '$w/ssh.log'
-printf 'dead\n'
+printf '%s\n' '$remote_state'
 SH
   chmod +x "$sshbin/ssh"
   W_PATH="$sshbin:$W_PATH"
@@ -1154,7 +1155,7 @@ SH
 
 test_move_refuses_before_stopping_anything() {
   local scenario out rc before args
-  for scenario in cmux unknown same-backend harness-mismatch missing-hc remote unreadable pending-composer; do
+  for scenario in cmux unknown same-backend harness-mismatch missing-hc remote-dead remote-alive unreadable pending-composer; do
     move_world "move-refuse-$scenario" claude
     args=(sm1 --backend hc)
     case "$scenario" in
@@ -1163,7 +1164,8 @@ test_move_refuses_before_stopping_anything() {
       same-backend) args=(sm1 --backend tmux) ;;
       harness-mismatch) args=(sm1 --backend t3code); printf 'pi\n' > "$W_DIR/home/config/secondmate-harness" ;;
       missing-hc) W_HCBIN="$W_DIR/no-such-dir/hc" ;;
-      remote) add_move_remote_dead "$W_DIR" ;;
+      remote-dead) add_move_remote "$W_DIR" dead ;;
+      remote-alive) add_move_remote "$W_DIR" alive ;;
       unreadable) : > "$W_MV/unreadable" ;;
       pending-composer) printf '❯ draft text\n' > "$W_MV/pane" ;;
     esac
@@ -1183,9 +1185,9 @@ test_move_refuses_before_stopping_anything() {
       same-backend) assert_contains "$out" "already recorded on backend=tmux" "a same-backend move points at relaunch" ;;
       harness-mismatch) assert_contains "$out" "runs only the claude and codex harnesses" "a target that cannot launch the mate's configured harness refuses before any stop" ;;
       missing-hc) assert_contains "$out" "backend=hc needs 'hc', which is not available here; nothing was stopped or moved" "a missing target binary refuses before any stop" ;;
-      remote)
-        assert_contains "$out" "a local move is refused" "a dead remote mate reaches the library's own refusal"
-        assert_contains "$(cat "$W_DIR/ssh.log")" "-- lab-host " "the remote mate must have been probed on its host"
+      remote-dead|remote-alive)
+        assert_contains "$out" "a local move is refused; nothing was stopped or moved" "a remote mate is refused before anything is stopped"
+        [ ! -s "$W_DIR/ssh.log" ] || fail "$scenario: a remote mate must be refused without contacting its host: $(cat "$W_DIR/ssh.log")"
         ;;
       unreadable) assert_contains "$out" "cannot be classified" "an unreadable endpoint refuses before any stop" ;;
       pending-composer) assert_contains "$out" "could not be proven stopped" "a refused stop ends the move" ;;
