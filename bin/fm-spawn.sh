@@ -5333,9 +5333,13 @@ EOF
       # FM_ROOT both resolve to that home), so the mate's terminal takes that
       # same space and the app shows the mate as its own agent with its crew
       # beside it. FM_HC_SPACE is deliberately not consulted here: it would
-      # move the mate out of the space its crew is about to use.
+      # move the mate out of the space its crew is about to use. The mate is
+      # also never a child of the launching Firstmate's own hc terminal (the
+      # adapter's caller-terminal placement): it is a peer agent, not crew,
+      # so HC_TERMINAL_ID is cleared for this one call and it starts
+      # --no-parent. Its own crew later become children of ITS terminal.
       HC_MATE_SPACE="fm-$(FM_HOME="$PROJ_ABS" FM_ROOT="$PROJ_ABS" fm_backend_hometag)"
-      HC_TERMINAL=$(FM_HC_SPACE="$HC_MATE_SPACE" fm_backend_hc_create_task "$HC_SES" "$W" "$PROJ_ABS") || exit 1
+      HC_TERMINAL=$(HC_TERMINAL_ID='' FM_HC_SPACE="$HC_MATE_SPACE" fm_backend_hc_create_task "$HC_SES" "$W" "$PROJ_ABS") || exit 1
     else
       HC_TERMINAL=$(fm_backend_hc_create_task "$HC_SES" "$W" "$PROJ_ABS") || exit 1
     fi

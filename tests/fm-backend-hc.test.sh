@@ -91,6 +91,8 @@ case "$*" in
   '-o args= -p '*)
     [ ! -e "$FAKE_HC_DIR/ps-args-fails-${*: -1}" ] || exit 1
     if [ -e "$FAKE_HC_DIR/ps-args-${*: -1}" ]; then cat "$FAKE_HC_DIR/ps-args-${*: -1}"; else printf 'sh\n'; fi ;;
+  # The caller-terminal ancestry walk reads real parent links.
+  '-o ppid= -p '*) exec /bin/ps "$@" ;;
   *) exit 1 ;;
 esac
 SH
@@ -620,6 +622,8 @@ test_task_names_are_valid_stable_and_collision_safe() {
   touch "$D/run-fails"
   expect_refused hc_shell 'fm_backend_hc_create_task fmtest fm-conflict /proj'
   pass "hc: task-derived names obey core rules, distinguish truncation collisions, and never hide a naming refusal"
+}
+
 # write_caller <dir> <address> <pid> <herdr.space>: the hc terminal Firstmate
 # itself would run in.
 write_caller() {
@@ -678,6 +682,8 @@ test_create_task_inside_firstmates_terminal_joins_its_space_as_child() {
   kill "$sleeper" 2>/dev/null || true
   wait "$sleeper" 2>/dev/null || true
   pass "hc: inside Firstmate's own hc terminal a task joins its space as a child; a non-ancestor or unknown id is ignored"
+}
+
 # A --secondmate launch is the PRIMARY's own fm-spawn.sh placing a DIFFERENT
 # home's agent. Identity labels must stay the primary's (its record owns the
 # terminal), while the Herdr.app space must be the mate home's own: the tag the
@@ -702,11 +708,15 @@ test_secondmate_spawn_lands_in_the_mates_own_space() {
   printf '{"address":"t9"}\n' > "$D/run.json"
   write_terminal "$D" t9 live "fm-$id" "$primary_tag" zsh /bin/zsh
   FM_TEST_CLEANUP_DIRS+=("/tmp/fm-$id")
+  # The primary itself runs in a live hc terminal (an ancestor of the spawn)
+  # placed in its own space. A task spawned from there joins it as a child,
+  # but a second mate is its own top-level agent and must never be nested.
+  write_caller "$D" t1 "$$" primary-caller-space
   # FM_HC_SPACE names the primary's own space; a mate must not be pulled into it.
-  out=$(env -u HC_TERMINAL_ID -u HC_TERMINAL_SOCKET -u HC_SCOPE -u HC_SOCKET -u TMUX -u HERDR_ENV \
+  out=$(env -u HC_TERMINAL_SOCKET -u HC_SCOPE -u HC_SOCKET -u TMUX -u HERDR_ENV \
     PATH="$FB:$PATH" FM_HC_BIN="$FB/hc" FAKE_HC_DIR="$D" HOME="$D/user-home" \
     FM_HOME="$HOMEDIR" FM_ROOT_OVERRIDE="$FM_TEST_ROOT" FM_SPAWN_NO_GUARD=1 \
-    FM_SKIP_SECONDMATE_SYNC=1 FM_HC_SPACE=primary-space HC_SESSION=fmtest \
+    FM_SKIP_SECONDMATE_SYNC=1 FM_HC_SPACE=primary-space HC_SESSION=fmtest HC_TERMINAL_ID=t1 \
     bash "$FM_TEST_ROOT/bin/fm-spawn.sh" "$id" "$mate" --secondmate --backend hc 2>&1) || rc=$?
   expect_code 0 "$rc" "a --secondmate spawn on hc must succeed"$'\n'"$out"
   assert_contains "$out" "spawned $id harness=codex kind=secondmate" "the spawn reports the mate"
@@ -717,6 +727,9 @@ test_secondmate_spawn_lands_in_the_mates_own_space() {
   done
   assert_not_contains "$run_line" "herdr.space=primary-space" "FM_HC_SPACE must not move the mate out of its own space"
   assert_not_contains "$run_line" "herdr.space=fm-$primary_tag" "the mate must not share the primary's space"
+  assert_not_contains "$run_line" "herdr.space=primary-caller-space" "the mate must not join the launching terminal's space"
+  assert_contains "$run_line" $'\x1f--no-parent\x1f' "a mate launched from inside Firstmate's hc terminal must start unparented"
+  assert_not_contains "$run_line" $'\x1f--parent\x1f' "a mate must never be nested under the launching terminal"
   meta=$(cat "$HOMEDIR/state/$id.meta")
   for line in kind=secondmate backend=hc hc_session=fmtest hc_terminal=t9 window=fmtest:t9 "home=$mate"; do
     assert_contains "$meta" "$line" "the published record must carry $line"
