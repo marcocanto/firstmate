@@ -118,20 +118,27 @@ hcx send --wait --json "$ADDR" 'Reply exactly HC-CONTROL-READY. No tools, file c
 wait_empty
 OLD_PID=$(hcx get --json "$ADDR" | jq -r '.foreground.pid')
 # A shell tool must never make its still-running parent agent read `dead`.
-hcx send --json "$ADDR" 'Use bash to run sleep 3, then reply HC-TOOL-FINISHED. Do not read or edit files.'
+# Whether the tool ran is read from a filesystem fact: the tool command
+# creates a marker the model cannot produce by replying alone. The screen is
+# not load-bearing because omp 18.17 renders a bash call as a model-written
+# title instead of the command, and omp runs `sleep` inside its own shell, so
+# no separate child process appears in the process table either.
+TOOL_MARK="$LAB/tool-ran"
+hcx send --json "$ADDR" "Call your bash tool exactly once with the command: touch '$TOOL_MARK' && sleep 3. After it returns, reply HC-TOOL-FINISHED. Do not read or edit files."
 SAW_WORKING=0
 SAW_TOOL=0
 for _ in $(seq 1 300); do
   status=$(hcx get --json "$ADDR" | jq -r '.status.state')
   assert_equals "$(fm_backend_agent_state hc "$TARGET" "$LABEL")" alive "a real omp turn must remain alive, including during its shell tool"
-  if hcx read "$ADDR" | grep -F '$ sleep 3' >/dev/null; then SAW_TOOL=1; fi
+  if [ "$status" = working ] && [ -e "$TOOL_MARK" ]; then SAW_TOOL=1; fi
   case "$status" in
     working) SAW_WORKING=1 ;;
     done|idle) [ "$SAW_WORKING" != 1 ] || break ;;
   esac
   sleep 0.2
 done
-[ "$SAW_WORKING" = 1 ] && [ "$SAW_TOOL" = 1 ] || fail "busy shell-tool liveness was not exercised"
+[ "$SAW_WORKING" = 1 ] || fail "omp never reported a working turn for the shell-tool prompt"
+[ "$SAW_TOOL" = 1 ] || { hcx read "$ADDR" >&2; fail "the shell tool never ran under omp, so busy shell-tool liveness was not exercised"; }
 wait_empty
 pass "hc control live: omp remains alive throughout a real shell-tool turn"
 bash "$ROOT/bin/fm-control.sh" "$ID" exit
@@ -159,6 +166,11 @@ pass "hc control live: replacement is alive in the same named terminal with loca
 hcx keys --json "$ADDR" x >/dev/null
 if bash "$ROOT/bin/fm-control.sh" "$ID" exit; then fail "pending composer input was overwritten"; fi
 assert_equals "$(fm_backend_agent_state hc "$TARGET" "$LABEL")" alive "pending-input refusal preserves the agent"
+# Clear the pending input. With omp's tui.vimMode on, the refused exit's
+# Escape leaves the composer in NORMAL mode, where Ctrl+U does not edit, so
+# `A` first enters insert mode at the end of the line; without vim mode it is
+# one more literal character that the same Ctrl+U clears.
+hcx keys --json "$ADDR" A >/dev/null
 hcx keys --json "$ADDR" ctrl+u >/dev/null
 wait_empty
 bash "$ROOT/bin/fm-control.sh" "$ID" exit

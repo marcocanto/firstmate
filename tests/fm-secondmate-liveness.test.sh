@@ -791,7 +791,7 @@ cmd=${1:-}
 last=''
 for a in "$@"; do last=$a; done
 case "$cmd" in
-  --version) printf 'hc 0.1.14\n' ;;
+  --version) printf 'hc 0.1.15\n' ;;
   server) printf '{"pid":1}\n' ;;
   connect) IFS= read -r _ || true; printf '{"jsonrpc":"2.0","id":1,"result":{"generation":1}}\n' ;;
   ls)
