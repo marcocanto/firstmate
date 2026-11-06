@@ -63,7 +63,9 @@ Two limits apply to auto-detection specifically:
 
 ## Task shape and metadata
 
-Each task is one hc terminal running the user's login shell in the project directory, started with `--no-parent --outlive-parent --no-notify` so it is independent of whichever hc terminal Firstmate itself runs in.
+Each task is one hc terminal running the user's login shell in the project directory, started with `--outlive-parent --no-notify` so it keeps running when Firstmate's own terminal ends and hc never types notes into Firstmate's composer.
+When Firstmate itself runs in a live hc terminal of the task's session, the task terminal is created as that terminal's child, so Herdr.app groups the crew as sub-agents of the Firstmate that launched it; otherwise it starts with `--no-parent`.
+Firstmate's terminal counts only when `HC_TERMINAL_ID` answers live in that session and its shell is an ancestor of the spawning process, so an inherited or stale id never adopts an unrelated terminal.
 Each terminal also has a deterministic task-derived core name, with a readable prefix and a checksum of the full home-scoped task label.
 Names fit hc's restricted alphabet and length; a name collision makes creation refuse rather than adopting or steering another terminal.
 Names are presentation only: every operation still addresses the recorded terminal address and verifies its ownership labels.
@@ -75,7 +77,7 @@ The terminal carries these labels:
 | --- | --- | --- |
 | `firstmate.task` | `fm-<id>` | Task identity checked before input or close. |
 | `firstmate.home` | `<hometag>` from `bin/fm-backend-hometag-lib.sh` | Keeps two homes with the same task id apart. |
-| `herdr.space` | `FM_HC_SPACE`, default `fm-<hometag>` | Groups a home's tasks in one Herdr.app space. |
+| `herdr.space` | `FM_HC_SPACE` when set, else the space of Firstmate's own hc terminal, else `fm-<hometag>` | Groups a home's tasks in one Herdr.app space, beside Firstmate when it runs in one. |
 | `herdr.tab` | `<hometag>-fm-<id>` | One Herdr.app tab per task. |
 
 ```text
@@ -98,7 +100,7 @@ An input, capture, or close that carries the task label refuses a terminal whose
 | Operation | hc command |
 | --- | --- |
 | Container ensure | `hc server status` plus the `hello` generation handshake over `hc connect` |
-| Create task | `hc run --bg --no-parent --outlive-parent --no-notify --cwd <project> --label ...` |
+| Create task | `hc run --bg --parent <firstmate-terminal>` or `--no-parent`, then `--outlive-parent --no-notify --name <task-name> --cwd <project> --label ...` |
 | Capture | `hc read --lines <n>` |
 | Visible capture | `hc read --lines 0` |
 | Send a line and submit | `hc send` |
