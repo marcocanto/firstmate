@@ -3922,6 +3922,7 @@ bin/fm-test-run.sh tests/fm-backend-hc-liveness-live-e2e.test.sh
 The installed supported harnesses classified `alive`: Claude Code 2.1.316, Codex 0.166.0, OpenCode 2.2.5, Pi 1.4.0, Grok 1.0.70, Cursor 2026.10.22-27dcf5f, Gemini 0.66.0, Muse 1.4.14-R7309.1, omp 18.14.1, and agy 1.4.12.
 Pi-signed, Kimi, Rovo, Devin, Polytoken, and Kiro were absent and explicitly reported unverified.
 Command Code and Cortex were not applicable because their launch adapters restrict them to tmux and Herdr.
+Re-run on 2026-11-06 on macOS with `hc 0.1.18`: Claude Code 2.1.304, Codex 0.166.0, Pi 1.1.0, omp 18.17.0, and agy 1.5.1 classified `alive`, and the guard reported the other harnesses absent or not applicable.
 
 Refresh the prompt-spending lifecycle proof with:
 
@@ -3942,6 +3943,10 @@ ok - hc control live: replacement is alive in the same named terminal with local
 ok - hc control live: pending input and unprovable absence still refuse
 FM_TEST_COMPLETE
 ```
+
+Re-run on 2026-11-06 on macOS with `hc 0.1.18` and `omp/18.17.0`, with the same four `ok` lines.
+omp 18.17 renders a bash tool call as a model-written title rather than `$ sleep 3`, and it runs that `sleep` without a separate child process, so the guard proves the shell-tool turn with a marker file the tool command creates.
+With omp's `tui.vimMode` on, the composer showed NORMAL mode after the refused `exit`, where Ctrl+U does not edit, so the guard enters insert mode with `A` before its Ctrl+U clears the pending input.
 
 On a bare initial omp screen, the unstyled capture includes a right-aligned thinking-effort hint and the composer reads `unknown`.
 After an ordinary reply, the empty `❯` composer reads `empty`; typed input returns `unknown` and is refused rather than overwritten.
@@ -3979,9 +3984,26 @@ The mate's terminal carried `herdr.space=fm-2ndmate-<id>-<hash of the mate home>
 On this host the lab teardown's fleet-state tripwire refused, because the live `default` core rewrote its own `terminals.json` during the run; the same file changed between two passive reads taken with no lab activity at all, no lab process survived the sweep, and the retained lab directory was removed by hand.
 A host whose real core is idle, such as the `tests-hc` CI lane, keeps the tripwire intact.
 
+### Second mates with real omp agents
+
+Measured on 2026-11-06 on macOS with `hc 0.1.18`, `herdr 0.9.5`, and `omp/18.17.0`, in one `bin/fm-hc-lab.sh` core session, one `bin/fm-herdr-lab.sh` session, and a `bin/fm-lab-home.sh` primary home checked out from this branch.
+Second mate homes were seeded with `bin/fm-home-seed.sh <id> <path> --no-projects`, and every agent was a real omp session.
+
+| Scenario | Commands | Result |
+| --- | --- | --- |
+| Launch | `bin/fm-spawn.sh <id> --secondmate --backend hc` | `parent: null`, `herdr.space=fm-2ndmate-<id>-<hash>`, the launching home's `firstmate.*` labels, a task-derived core name, and agent state `alive`; the mate ran its own session start. |
+| Recovery | `bin/fm-bootstrap.sh` after killing the omp process, then after `hc kill` of the terminal, then once more | The dead terminal and the finished husk were each removed and the mate respawned at a new address with the same labels, on `backend=hc`; the alive mate's record stayed byte-identical; the sweep printed no `SECONDMATE_LIVENESS` line. |
+| Move | `bin/fm-secondmate-move.sh <id> --backend hc` on a mate launched with `--backend herdr` | `moved <id> from=herdr to=hc`; the Herdr pane read `missing` and the hc agent `alive` in the mate's own space. A same-backend target, a missing hc binary, and an hc reporting 0.1.14 each refused with the mate still alive and its record unchanged. An injected `hc run` failure after the stop left `backend=herdr` in the record, and the next sweep respawned the mate on Herdr. A record with `remote_host` refused before contacting the host. |
+| Steering | `bin/fm-send.sh <id> <text>` | The record landed in `state/<id>.inbox/`, the doorbell submitted in the hc terminal, and the mate ran the requested command, moved the record to `handled/`, and replied on its parent channel. |
+| Crew lifecycle | The mate ran `bin/fm-spawn.sh <task> <project> --backend hc` from its own terminal; then `bin/fm-control.sh <task> exit`, a repeated `exit`, and `relaunch --harness omp` from outside | The task terminal was the mate terminal's child in the mate's space with the mate home's labels; `exit` left a shell, the repeated `exit` printed `already-stopped`, and `relaunch` started a new omp process in the same terminal address with the same core name, branch head, and uncommitted edit. `bin/fm-control.sh <mate> exit` refused with `the hc backend does not support secondmate lifecycle control`. |
+| Primary | `omp` started in an hc terminal of the lab core with `FM_HOME` set to the lab home | The omp extension ran `bin/fm-session-start.sh` at session open and the session lock named the omp process; the extension armed the watcher, and a `blocked:` line appended to a lab task's status file reached the primary as a watcher wake 46 seconds later. `bin/fm-supervise-daemon.sh` run in an hc terminal exited 1 with `error: away-mode daemon does not support supervisor backend 'hc' yet`. |
+
+A process inside a lab core's terminal cannot discover the lab's pinned socket, because the adapter resolves the core from `HC_SESSION` and hc's default socket layout.
+The mate's first crew spawn without a pin failed with `error: 'hc server status' failed for session '<lab session>'`, so the crew spawn and the primary's launch named `FM_HC_SOCKET`.
+
 ### Not verified
 
-- A fresh ship spawn with a real harness rather than the stand-in; the real omp replacement launch is verified above.
+- That Firstmate processes inside a terminal of the Herdr app's own core reach that core without `FM_HC_SOCKET`; the lab above could not exercise it.
 - How a second mate's space and tab display in a live Herdr.app window.
 - `send --wait`'s `started`/`working` proof against a real status-reporting harness; the lab run covered a non-reporting shell, whose verdict falls to the composer screen.
 - Conversational submit confirmation across harnesses beyond the exercised omp lifecycle path.

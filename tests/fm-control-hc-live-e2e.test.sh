@@ -166,9 +166,9 @@ pass "hc control live: replacement is alive in the same named terminal with loca
 hcx keys --json "$ADDR" x >/dev/null
 if bash "$ROOT/bin/fm-control.sh" "$ID" exit; then fail "pending composer input was overwritten"; fi
 assert_equals "$(fm_backend_agent_state hc "$TARGET" "$LABEL")" alive "pending-input refusal preserves the agent"
-# Clear the pending input. With omp's tui.vimMode on, the refused exit's
-# Escape leaves the composer in NORMAL mode, where Ctrl+U does not edit, so
-# `A` first enters insert mode at the end of the line; without vim mode it is
+# Clear the pending input. With omp's tui.vimMode on, the composer is in
+# NORMAL mode after the refused exit, where Ctrl+U does not edit, so `A`
+# first enters insert mode at the end of the line; without vim mode it is
 # one more literal character that the same Ctrl+U clears.
 hcx keys --json "$ADDR" A >/dev/null
 hcx keys --json "$ADDR" ctrl+u >/dev/null

@@ -134,6 +134,7 @@ The respawn is `bin/fm-spawn.sh <id> --secondmate` on the mate's recorded backen
 [`bin/fm-secondmate-move.sh`](../bin/fm-secondmate-move.sh) `<id> --backend hc` moves an existing local mate from another local backend onto hc while keeping its home, records, and backlog, and recovery then keeps it on hc because the record names hc; its header owns the sequence and its refusals.
 It refuses a remote second mate.
 Lifecycle control of an hc second mate (`bin/fm-control.sh <id> exit` and `relaunch`) is refused; the ship and scout support above does not extend to second mates.
+So a move cannot stop a live hc mate, and moving one off hc refuses before anything changes.
 
 ## Limits
 
@@ -150,6 +151,8 @@ Lifecycle control of an hc second mate (`bin/fm-control.sh <id> exit` and `relau
 - Plain `hc read` carries no styling.
   An idle-looking hint or typed text can therefore leave the composer `unknown`; `exit` and `relaunch` refuse until the shared classifier positively proves it empty.
 - A worker inherits `HC_SESSION`, `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET`, and `HC_SCOPE` from its terminal, and the `config/launch-env-allowlist` floor keeps them; whether a real harness then reports native status under Firstmate's launch is not verified.
+  A Firstmate process inside an hc terminal, such as a second mate spawning its own crew, reaches the core from that `HC_SESSION` through hc's default socket layout, because the adapter strips the inherited `HC_TERMINAL_SOCKET`.
+  A core on any other socket, such as a `bin/fm-hc-lab.sh` session, needs `FM_HC_SOCKET` set in that process.
 - Naming Herdr.app spaces or tabs needs the app window and is not done.
   The `herdr.space`/`herdr.tab` label contract above is the app's documented bridge (its window projects labeled terminals as spaces/tabs and keeps unlabeled ones hidden), verified against a real window: [`verification/runtime-backends.md`](verification/runtime-backends.md#hc) records the live exercise.
 - hc has no event stream this adapter consumes; supervision polls like tmux.
