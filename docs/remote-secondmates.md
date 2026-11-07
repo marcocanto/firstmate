@@ -813,8 +813,13 @@ Then the conversion stops the agent through `bin/fm-control.sh <id> exit`, close
 Finally it launches the mate with `bin/fm-spawn.sh <id> --secondmate --backend hc` and the harness, model, and effort the local record named, which publishes the remote record and arms the reply mirror.
 If that launch fails, every change above is undone and the previous local record is put back, so the next liveness recovery respawns the mate locally.
 A launch whose completion is unknown, or one the host completed while this home could not record it, keeps the remote route and names the command that finishes it, because restoring the local route would put a second agent beside the remote one.
+A conversion interrupted by a signal runs the same undo on its way out; one killed before that undo finishes leaves the previous local record at `state/.<id>.meta.convert.<pid>`, which goes back to `state/<id>.meta` under the record's lock.
+The conversion runs the readiness gate and the remote launch's inheritance transfer over SSH, so it takes minutes on a loaded host; run it where nothing kills a long command.
 A Rex or T3 mate is refused, because its endpoint lives in a home-scoped server or thread; move it onto hc with `--backend hc` first.
 The [`bin/fm-secondmate-move.sh`](../bin/fm-secondmate-move.sh) header owns the sequence.
+
+When the primary home later moves, the new primary takes over a converted mate from copies of the old primary's registry entry in `data/secondmates.md`, `state/<id>.meta`, `state/<id>.status`, `state/remote-replies/<id>.cursor`, and `state/.remote-reply-mirrored-<id>`, then arms the mirror with `bin/fm-procevent-remote-reply.sh arm <id>` after the old home's listener stops (`bin/fm-procevent.sh sweep-home` there).
+Leave the `state/remote-replies/<id>.<n>.ingested` receipts behind: they are keyed by the old home's event sequence numbers, and the new home's first capture reuses those numbers, so a copied receipt makes that capture conflict instead of applying.
 
 ### Firstmate code convergence
 

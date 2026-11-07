@@ -531,7 +531,7 @@ remote_convert() {
   want=$(fm_secondmate_home_identity "$home") || die "the identity of $home cannot be read; nothing was stopped or converted"
   got=$(printf '%s\n' "$out" | grep -E '^(uid|home)=')
   [ "$got" = "$want" ] \
-    || die "the SSH alias $CONVERT_HOST does not reach this account and this home on this machine (host: $(printf '%s' "$got" | tr '\n' ' ')this machine: $(printf '%s' "$want" | tr '\n' ' ')); nothing was stopped or converted"
+    || die "the SSH alias $CONVERT_HOST does not reach this account and this home on this machine (host: $(printf '%s\n' "$got" | paste -sd ' ' -); this machine: $(printf '%s\n' "$want" | paste -sd ' ' -)); nothing was stopped or converted"
 
   rc=0
   FM_DATA_OVERRIDE="$CV_STAGE/data" fm_remote_readiness_ensure "$SCRIPT_DIR" "$ID" hc "$harness" || rc=$?
@@ -556,8 +556,9 @@ remote_convert() {
 
   # The local record is set aside, not edited: the launch below publishes the
   # remote one, and a failure puts this one back.
-  meta_lock=$(fm_meta_lock_path "$META") && fm_lock_acquire_wait "$meta_lock" \
-    || cv_fail "second mate $ID's record lock could not be taken"
+  if ! meta_lock=$(fm_meta_lock_path "$META") || ! fm_lock_acquire_wait "$meta_lock"; then
+    cv_fail "second mate $ID's record lock could not be taken"
+  fi
   CV_META_ASIDE="$STATE/.$ID.meta.convert.$$"
   if ! mv -f -- "$META" "$CV_META_ASIDE"; then
     CV_META_ASIDE=
