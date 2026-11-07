@@ -13,6 +13,10 @@
 #
 # The remote transport is faked at the SSH boundary, exactly as the other
 # remote-secondmate suites fake it, rather than exercising a real host.
+#
+# It also covers bin/fm-control.sh's remote placement block: a remote hc mate's
+# interrupt, exit, and relaunch cross to its host, and any other remote mate
+# stays refused.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -81,6 +85,12 @@ if [ "$cmd" = fm-remote-doctor.sh ]; then
 fi
 [ "$cmd" = fm-remote-secondmate-control.sh ] || exit 93
 printf '%s %s %s\n' "$cmd" "$action" "$id" >> "$FM_FAKE_HOST_LOG"
+if [ "$action" = control ]; then
+  printf 'control verb %s\n' "$harness" >> "$FM_FAKE_HOST_LOG"
+  [ -z "${FM_FAKE_CONTROL_RC:-}" ] || exit "$FM_FAKE_CONTROL_RC"
+  printf '%s %s\n' "$harness" "$id"
+  exit 0
+fi
 [ "$action" = relaunch ] || exit 94
 case "$FM_FAKE_RELAUNCH_MODE" in
   refuse)
@@ -238,5 +248,69 @@ expect_code 0 "$RC" "a confirmed remote relaunch should succeed with an armed PR
 fm_pr_poll_artifacts_valid "$HOME_DIR/state" ios "$ROOT/bin/fm-pr-poll.sh" \
   || fail "a remote relaunch broke PR poll authentication by writing harness/model/effort after pr="
 pass "a remote relaunch keeps an already-armed PR poll authenticating"
+
+# --- bin/fm-control.sh routes a remote hc mate's lifecycle to its host --------
+# A remote hc mate's verbs cross to the host's own control plane; a remote mate
+# on another backend keeps the refusal, because nothing here could verify it.
+run_control() {  # <args...>
+  env FM_HOME="$HOME_DIR" FM_SSH_BIN="$FAKEBIN/fake-ssh" \
+    FM_FAKE_RELAUNCH_MODE="${FM_FAKE_RELAUNCH_MODE:-}" \
+    FM_FAKE_DOCTOR_MODE="${FM_FAKE_DOCTOR_MODE:-}" \
+    FM_FAKE_CONTROL_RC="${FM_FAKE_CONTROL_RC:-}" \
+    FM_FAKE_HOST_LOG="$TMP/host.log" \
+    "$ROOT/bin/fm-control.sh" "$@" 2>&1
+}
+reset_hc_meta() {
+  reset_meta
+  sed -e 's/^remote_backend=herdr$/remote_backend=hc/' \
+    -e 's/^remote_herdr_session=fm-remote$/remote_hc_session=default/' \
+    -e 's/^remote_target=fm-remote:w1:p1$/remote_target=default:t4/' \
+    "$HOME_DIR/state/ios.meta" > "$TMP/ios-hc.meta"
+  cat "$TMP/ios-hc.meta" > "$HOME_DIR/state/ios.meta"
+}
+
+reset_meta
+: > "$TMP/host.log"
+OUT=$(run_control ios exit); RC=$?
+[ "$RC" -ne 0 ] || fail "a remote herdr mate's exit was accepted by the local control plane"
+assert_contains "$OUT" "is a remotely placed secondmate on remote-mac" "the herdr refusal did not name the placement"
+[ ! -s "$TMP/host.log" ] || fail "a refused remote herdr exit still reached the host"
+
+reset_hc_meta
+for verb in interrupt exit; do
+  : > "$TMP/host.log"
+  OUT=$(run_control ios "$verb"); RC=$?
+  expect_code 0 "$RC" "a remote hc $verb did not succeed"$'\n'"$OUT"
+  assert_grep 'fm-remote-secondmate-control.sh control ios' "$TMP/host.log" "the remote hc $verb did not reach the host control verb"
+  assert_grep "control verb $verb" "$TMP/host.log" "the host received the wrong verb for $verb"
+  assert_contains "$OUT" "$verb ios" "the host's confirmation did not reach the caller"
+done
+FM_FAKE_CONTROL_RC=255
+OUT=$(run_control ios exit); RC=$?
+unset FM_FAKE_CONTROL_RC
+expect_code 255 "$RC" "an unreachable host exit was not reported as unknown"
+assert_contains "$OUT" "was unreachable or its exit completion is unknown" "the unreachable host was not named"
+
+: > "$TMP/host.log"
+OUT=$(run_control ios relaunch --harness claude --model claude-opus-5-5); RC=$?
+expect_code 0 "$RC" "a remote hc relaunch through fm-control failed"$'\n'"$OUT"
+assert_grep 'fm-remote-secondmate-control.sh relaunch ios' "$TMP/host.log" "the remote hc relaunch did not reach the host"
+assert_grep 'harness=claude' "$HOME_DIR/state/ios.meta" "fm-control's remote relaunch did not republish the parent record"
+assert_grep 'effort=default' "$HOME_DIR/state/ios.meta" "an unset axis kept the previous harness's effort across a harness change"
+: > "$TMP/host.log"
+OUT=$(run_control ios relaunch --harness pi); RC=$?
+expect_code 0 "$RC" "a remote hc relaunch onto another harness failed"$'\n'"$OUT"
+assert_grep 'model=default' "$HOME_DIR/state/ios.meta" "the previous harness's model carried over a harness change"
+assert_no_grep 'model=claude-opus-5-5' "$HOME_DIR/state/ios.meta" "the claude model was sent to the pi relaunch"
+reset_hc_meta
+OUT=$(run_control ios relaunch --effort high); RC=$?
+expect_code 0 "$RC" "a remote hc relaunch on the same harness failed"$'\n'"$OUT"
+assert_grep 'harness=pi' "$HOME_DIR/state/ios.meta" "an unset harness did not keep the recorded harness"
+assert_grep 'model=openai-codex/gpt-5.6-sol' "$HOME_DIR/state/ios.meta" "an unset axis did not keep the recorded model on the same harness"
+assert_grep 'effort=high' "$HOME_DIR/state/ios.meta" "the given effort was not applied"
+OUT=$(run_control ios relaunch --account other); RC=$?
+[ "$RC" -ne 0 ] || fail "an account switch was accepted for a remote hc mate"
+assert_contains "$OUT" "a remote secondmate's account lives in its home on remote-mac" "the account refusal was not explained"
+pass "fm-control drives a remote hc mate on its host and keeps refusing other remote mates"
 
 echo "ALL TESTS PASSED"

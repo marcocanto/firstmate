@@ -67,7 +67,7 @@ bin/fm-home-seed.sh <id> <home|-> {<project>...|--no-projects}
 Provision a whole remote home through its configured SSH host with:
 
 ```sh
-bin/fm-remote-home-seed.sh <id> <ssh-alias> <remote-root> <remote-home> {<project>[=<origin-url>]...|--no-projects}
+bin/fm-remote-home-seed.sh <id> <ssh-alias> <remote-root> <remote-home> [--backend herdr|rex|hc] {<project>[=<origin-url>]...|--no-projects}
 ```
 
 You resolve each project's origin yourself - from the captain, the project registry, a clone that exists elsewhere, `gh-axi`, or an explicit paste - and name it as `<project>=<origin-url>`; the seed validates and transports what you supply.
@@ -225,6 +225,7 @@ If the secondmate is already running and only inherited local material changed, 
 Before moving a live LOCAL secondmate onto a newly pinned harness, model, or effort, check replacement support in [`docs/agent-control.md`](../../../docs/agent-control.md#fail-closed-boundaries).
 On a supported backend, set `config/secondmate-harness` and relaunch it with `bin/fm-control.sh <id> relaunch`, which re-resolves that pin, stops the agent, and launches the replacement in the same home.
 Move a LOCAL secondmate onto another local backend, for example into the Herdr app on `hc`, with `bin/fm-secondmate-move.sh <id> --backend <name>`, which stops the agent, closes the old endpoint, and respawns the mate through the ordinary guarded path with that backend named, keeping its home, records, and backlog; its header owns the sequence and its refusals, and [`docs/hc-backend.md`](../../../docs/hc-backend.md#second-mates) owns what an hc second mate looks like.
+Turn a LOCAL secondmate into a remote route on the same machine, for example before the primary home moves to another machine, with `bin/fm-secondmate-move.sh <id> --remote <ssh-alias> --root <code-root>`; it keeps the home, backlog, lanes, and records in place and rewrites only the route, and [Convert a local second mate to a remote route](../../../docs/remote-secondmates.md#convert-a-local-second-mate-to-a-remote-route) owns its preconditions.
 The same relaunch and recovery paths honor the durable [per-secondmate account pin](../../../docs/configuration.md#per-secondmate-account-pins).
 That plane refuses a remotely placed secondmate by name, because its agent runs on another host where none of the plane's postconditions can be read.
 Move a REMOTE one with `bin/fm-remote-secondmate-relaunch.sh <id> <harness> <model|default|-> <effort|default|->`, which runs that same control-plane relaunch on its host and then republishes this primary's own route metadata from the identity the host confirmed; later recovery and restart reuse that record, so setting `config/secondmate-harness` alone never moves a remote route; pass the profile explicitly and use `default` for an absent pin, because `config/secondmate-harness` is not inherited and the copy on that host belongs to a different home ([`docs/remote-secondmates.md`](../../../docs/remote-secondmates.md)).

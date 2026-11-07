@@ -78,6 +78,44 @@ fm_backend_hc_session() {
   printf '%s' "${HC_SESSION:-default}"
 }
 
+# fm_backend_hc_remote_session: the hc session a remote second mate's home
+# places its agent on (docs/remote-secondmates.md "Launch or recover"). The
+# remote job worker runs every host command under `env -i`, so no HC_SESSION
+# reaches it; the home's own config/hc-session carries the choice instead, and
+# an absent file means the account's `default` core, the one Herdr.app binds.
+# Prints the session, or fails on a file whose first line is not one valid name.
+fm_backend_hc_remote_session() {  # <home>
+  local file=$1/config/hc-session session
+  if [ ! -e "$file" ] && [ ! -L "$file" ]; then
+    printf 'default'
+    return 0
+  fi
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  session=$(head -n 1 "$file" 2>/dev/null | tr -d '[:space:]') || return 1
+  fm_backend_hc_atom_valid "$session" || return 1
+  printf '%s' "$session"
+}
+
+# fm_backend_hc_version_at_least: <x.y.z> is at or above the verified floor.
+fm_backend_hc_version_at_least() {  # <x.y.z>
+  local ver=$1 major rest minor patch fmaj fmin fpat
+  major=${ver%%.*}
+  rest=${ver#*.}
+  minor=${rest%%.*}
+  case "$rest" in
+    *.*) patch=${rest#*.} ;;
+    *) patch=0 ;;
+  esac
+  patch=${patch%%[^0-9]*}
+  case "$major" in ''|*[!0-9]*) major=0 ;; esac
+  case "$minor" in ''|*[!0-9]*) minor=0 ;; esac
+  case "$patch" in ''|*[!0-9]*) patch=0 ;; esac
+  IFS=. read -r fmaj fmin fpat <<EOF
+$FM_BACKEND_HC_MIN_VERSION
+EOF
+  [ $((major * 1000000 + minor * 1000 + patch)) -ge $((fmaj * 1000000 + fmin * 1000 + fpat)) ]
+}
+
 # fm_backend_hc_bin: the resolved herdr-core binary path, or failure. The
 # release asset's own name is `herdr-core`; `hc` is its CLI alias. FM_HC_BIN
 # wins so tests and the lab can pin a build; version_check still proves the
@@ -94,7 +132,7 @@ fm_backend_hc_bin() {
 # fm_backend_hc_version_check: refuse loudly on a missing, misnamed, or
 # older-than-verified binary. `<bin> --version` must print `hc x.y.z`.
 fm_backend_hc_version_check() {
-  local bin raw ver major rest minor patch cur min fmaj fmin fpat
+  local bin raw ver
   bin=$(fm_backend_hc_bin) || {
     echo "error: backend=hc selected but no 'herdr-core' or 'hc' binary was found on PATH (install Herdr Core per docs/hc-backend.md or set FM_HC_BIN)" >&2
     return 1
@@ -111,23 +149,7 @@ fm_backend_hc_version_check() {
       return 1
       ;;
   esac
-  major=${ver%%.*}
-  rest=${ver#*.}
-  minor=${rest%%.*}
-  case "$rest" in
-    *.*) patch=${rest#*.} ;;
-    *) patch=0 ;;
-  esac
-  patch=${patch%%[^0-9]*}
-  case "$major" in ''|*[!0-9]*) major=0 ;; esac
-  case "$minor" in ''|*[!0-9]*) minor=0 ;; esac
-  case "$patch" in ''|*[!0-9]*) patch=0 ;; esac
-  IFS=. read -r fmaj fmin fpat <<EOF
-$FM_BACKEND_HC_MIN_VERSION
-EOF
-  cur=$((major * 1000000 + minor * 1000 + patch))
-  min=$((fmaj * 1000000 + fmin * 1000 + fpat))
-  if [ "$cur" -lt "$min" ]; then
+  if ! fm_backend_hc_version_at_least "$ver"; then
     echo "error: herdr-core $ver is older than the verified minimum $FM_BACKEND_HC_MIN_VERSION; update herdr-core before using backend=hc" >&2
     return 1
   fi
@@ -417,6 +439,28 @@ fm_backend_hc_composer_state() {  # <target> [expected-label] -> empty|pending|p
   printf '%s' "$verdict"
 }
 
+# fm_backend_hc_blocked_send_proven: whether a send hc refused as blocked may
+# be repeated with --force. hc refuses `send` (never `keys`) to any terminal
+# whose root 7501 record says blocked, and fm-osc7501.sh publishes a worker's
+# open needs-decision or blocked status line as exactly such a record. That
+# record is attention for the operator, not a dialog in the program, so it
+# must not stop Firstmate from steering the worker. Both proofs are required:
+#   - the blocked record is Firstmate's own (app=firstmate-*). A blocked
+#     record from the program itself names a dialog Firstmate's screen reader
+#     may not recognize, so it is never forced.
+#   - one screen read classifies as an empty composer with no recognized
+#     blocking dialog. Held composer text, a picker, or an unreadable screen
+#     is never forced.
+fm_backend_hc_blocked_send_proven() {  # <target> [expected-label]
+  local target=$1 expected=${2:-} json app cap
+  json=$(fm_backend_hc_get "$target") || return 1
+  app=$(printf '%s' "$json" | jq -r 'if .status.state == "blocked" then (.status.app // "") else "" end' 2>/dev/null) || return 1
+  case "$app" in firstmate-?*) ;; *) return 1 ;; esac
+  cap=$(fm_backend_hc_visible_capture "$target" "$expected") || return 1
+  ! fm_composer_blocking_dialog "$cap" >/dev/null || return 1
+  [ "$(fm_composer_classify_screen "$(fm_backend_hc_composer_caps)" "$cap")" = empty ]
+}
+
 # fm_backend_hc_send_text_submit: one `hc send --wait`, which pastes, presses
 # Enter, and reports the turn it started. Echoes
 # empty|pending|pending-unproven|unknown|send-failed, a subset of the
@@ -427,8 +471,9 @@ fm_backend_hc_composer_state() {  # <target> [expected-label] -> empty|pending|p
 # started:null once the bounded wait times out; the send still typed and
 # entered, so the verdict falls back to the composer screen, and only a
 # proven pending composer gets Enter retries through the shared loop. A
-# blocked terminal refuses with exit 9 before typing - unknown, with a
-# diagnostic and no retries, never forced. The other structured refusals
+# blocked terminal refuses with exit 9 before typing; the send is repeated
+# with --force only under fm_backend_hc_blocked_send_proven, and otherwise it
+# is unknown, with a diagnostic and no retries. The other structured refusals
 # (3 not_found, 11 finished) and any other failure are send-failed.
 fm_backend_hc_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [expected-label]
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 expected=${6:-}
@@ -442,10 +487,15 @@ fm_backend_hc_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <s
   out=$(fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json "$FM_BACKEND_HC_ADDRESS" \
     --wait --timeout "$wait_secs" -- "$text" 2>&1)
   rc=$?
+  if [ "$rc" -eq 9 ] && fm_backend_hc_blocked_send_proven "$target" "$expected"; then
+    out=$(fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json --force "$FM_BACKEND_HC_ADDRESS" \
+      --wait --timeout "$wait_secs" -- "$text" 2>&1)
+    rc=$?
+  fi
   case "$rc" in
     0) ;;
     9)
-      echo "error: hc send refused $target - the terminal is blocked waiting on input (never forced): $out" >&2
+      echo "error: hc send refused $target - the terminal is blocked waiting on input and Firstmate could not prove its own status over an empty composer (not forced): $out" >&2
       printf 'unknown'
       return 0
       ;;

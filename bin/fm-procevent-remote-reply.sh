@@ -11,6 +11,7 @@
 #   fm-procevent-remote-reply.sh source-id <secondmate-id>
 #   fm-procevent-remote-reply.sh relisten
 #   fm-procevent-remote-reply.sh retire <secondmate-id>
+#   fm-procevent-remote-reply.sh adopt <secondmate-id> <log-prefix-file>
 #
 # `arm` registers one blocking, non-destructive delta source for the remote
 # home's state/parent-replies.status log. The process-event runner owns blocking,
@@ -23,6 +24,16 @@
 # window, so it relistens too (see JOB_PREEMPTED below).
 # A continuity break is escalated and not re-armed, so the registration is dropped
 # and the runner stops. The runner does not refresh the owner lease.
+#
+# `adopt` starts the channel for a route whose remote log already holds lines
+# this parent has in its own state/<id>.status: a local mate converted to a
+# remote route in place (bin/fm-secondmate-move.sh) has its old parent stream
+# copied into the new log first. <log-prefix-file> holds exactly those bytes.
+# adopt commits the cursor at their end and records each of their lines as
+# already mirrored, so neither the first read nor a later whole-log recapture
+# after retirement appends them a second time. It refuses when this route
+# already has a cursor or ingestion receipts, because adopting over them would
+# skip or repeat lines another registration already counted.
 #
 # `autohandle` is the runner's own entry into that same `handle`: it takes the
 # canonical source id instead of the secondmate id and is called by the runner
@@ -97,7 +108,7 @@ DOCUMENT_LOCAL_FAILURE=2
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,77p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 # Lifecycle-lock EXIT traps must compose temporary-path cleanup with lock
 # release; installing only one would silently drop the other obligation.
@@ -294,6 +305,60 @@ cmd_arm() {
     LIFECYCLE_LOCK=$lock
     trap 'cleanup_temp_paths; fm_lock_release "$LIFECYCLE_LOCK"' EXIT
     cmd_arm_locked "$id"
+  )
+}
+
+cmd_adopt_locked() {
+  local id=$1 prefix=$2 cursor receipt offset hash source_record tmp lock rc=0
+  cursor=$(cursor_path "$id")
+  [ ! -e "$cursor" ] && [ ! -L "$cursor" ] \
+    || die "remote reply route $id already has a cursor; retire it before adopting a log prefix"
+  for receipt in "$CURSOR_DIR/$id".*.ingested; do
+    [ -e "$receipt" ] || [ -L "$receipt" ] || continue
+    die "remote reply route $id already has ingestion receipts; retire it before adopting a log prefix"
+  done
+  [ -f "$prefix" ] && [ ! -L "$prefix" ] || die "log prefix is unavailable or unsafe: $prefix"
+  offset=$(LC_ALL=C wc -c < "$prefix" | tr -d ' ') || die "cannot size the log prefix"
+  hash=$(sha256_file "$prefix") || die "cannot hash the log prefix"
+  mkdir -p "$STATE" || die "cannot create parent state directory"
+  source_record=$(mirrored_source_path "$id")
+  if [ -L "$source_record" ] || { [ -e "$source_record" ] && [ ! -f "$source_record" ]; }; then
+    die "remote reply mirrored-source record is unsafe: $source_record"
+  fi
+  lock="$STATE/.remote-reply-ingest-$id.lock"
+  fm_lock_acquire_wait "$lock" || die "cannot lock remote reply ingest for $id"
+  tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-remote-reply-adopt.XXXXXX") \
+    || { fm_lock_release "$lock"; die "cannot stage the adopted log prefix"; }
+  INGEST_TMP=$tmp
+  # The identity every later ingest compares against: the normalized source
+  # line, blank separators omitted (stage_mirror_lines).
+  normalize_payload "$prefix" "$tmp" || rc=1
+  if [ "$rc" -eq 0 ]; then
+    [ -e "$source_record" ] || (umask 077; : > "$source_record") || rc=1
+  fi
+  if [ "$rc" -eq 0 ]; then
+    LC_ALL=C awk -v record="$source_record" '
+      BEGIN { while ((getline line < record) > 0) seen[line] = 1; close(record) }
+      $0 != "" && !($0 in seen) { seen[$0] = 1; print }
+    ' "$tmp" >> "$source_record" || rc=1
+  fi
+  [ "$rc" -ne 0 ] || write_cursor "$id" "$offset" "$hash" || rc=1
+  fm_lock_release "$lock"
+  rm -f -- "$tmp"
+  INGEST_TMP=''
+  [ "$rc" -eq 0 ] || die "cannot adopt the log prefix for $id"
+  printf 'adopted: %s offset=%s\n' "$id" "$offset"
+}
+
+cmd_adopt() {
+  local id=${1:-} prefix=${2:-} lock
+  validate_id "$id"
+  lock=$(secondmate_reply_lifecycle_lock_path "$STATE" "$id")
+  (
+    fm_lock_acquire_wait "$lock" || die "cannot lock remote reply lifecycle for $id"
+    LIFECYCLE_LOCK=$lock
+    trap 'cleanup_temp_paths; fm_lock_release "$LIFECYCLE_LOCK"' EXIT
+    cmd_adopt_locked "$id" "$prefix"
   )
 }
 
@@ -866,6 +931,7 @@ require_parent_lifecycle_lock() {
 
 case "${1:-}" in
   arm) shift; [ "$#" -eq 1 ] || usage; cmd_arm "$@" ;;
+  adopt) shift; [ "$#" -eq 2 ] || usage; cmd_adopt "$@" ;;
   arm-locked) shift; [ "$#" -eq 1 ] || usage; require_parent_lifecycle_lock "$1"; cmd_arm_locked "$@" ;;
   source) shift; [ "$#" -eq 1 ] || usage; cmd_source "$@" ;;
   handle) shift; [ "$#" -eq 3 ] || usage; cmd_handle "$@" ;;

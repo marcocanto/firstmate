@@ -12,7 +12,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Worker permissions, accounts, or environment | [Codex approval review](#codex-automatic-approval-review), [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Codex permission mode](#codex-permission-mode-configcodex-permission-mode), [persistent managed-policy failover](#persistent-managed-policy-failover), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [several Claude accounts](#several-claude-accounts-configclaude-accounts), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist), and its [Orca environment source](#orca-environment-source-configlaunch-env-tmux-session) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), [external memory tiers](#external-memory-tiers-memory-layering-section), [record export](#record-export-configrecord-export-root), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), [Codex native Stop park](#codex-native-stop-park-configcodex-stop-park), [warm-cache compaction](#warm-cache-compaction-configwarm-compact), and [Calm preference](#calm-preference-configcalm) |
-| Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) |
+| Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) and the [remote hc core](#remote-hc-core-confighc-session) |
 | Review bots on owned GitHub pull requests | [Contribution review bots](#contribution-review-bots-configcontribution-review-bots) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
 
@@ -589,8 +589,17 @@ Any value other than `tmux`, `herdr`, `zellij`, `orca`, `cmux`, `paseo`, `rex`, 
 `fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, `cmux`, `paseo`, `rex`, `t3code`, `tern`, and `hc` for ship and scout tasks.
 `backend=orca`, `backend=cmux`, `backend=paseo`, and `backend=tern` still refuse `--secondmate` until secondmate launch semantics are designed for each; `FM_BACKEND_SECONDMATE` in [`bin/fm-backend.sh`](../bin/fm-backend.sh) is the one owner of that list.
 `backend=t3code` supports secondmates and runs only the `claude` and `codex` harnesses, and `backend=hc` supports secondmates as [Second mates](hc-backend.md#second-mates) describes.
+A remote second mate can run on hc on its host; [Remote second mates](remote-secondmates.md#launch-or-recover) owns that placement.
 
 `codex-app` is not an accepted runtime backend yet; [`docs/codex-app-backend.md`](codex-app-backend.md) owns the Codex App boundary.
+
+### Remote hc core (config/hc-session)
+
+The remote home of a remote second mate on hc may hold `config/hc-session`, whose first line names the hc core session its host launches and reads it on; any later lines are ignored.
+Absent, the host uses `default`, the core Herdr.app starts in the account's GUI login session.
+The host reads this file rather than `HC_SESSION`, because the remote job worker runs every command with an empty environment.
+A name outside letters, digits, dot, dash, and underscore is refused by the launch and reported by `bin/fm-remote-doctor.sh --backend hc`.
+The file is home-local and is not inherited from the primary.
 
 ### Liveness classification
 

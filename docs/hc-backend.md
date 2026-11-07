@@ -132,9 +132,14 @@ A terminal whose program finished reads `missing` while the core still lists it 
 A terminal already gone is simply respawned, and an alive mate is never touched.
 The respawn is `bin/fm-spawn.sh <id> --secondmate` on the mate's recorded backend, so a local hc second mate stays on hc whatever `config/backend` says.
 [`bin/fm-secondmate-move.sh`](../bin/fm-secondmate-move.sh) `<id> --backend hc` moves an existing local mate from another local backend onto hc while keeping its home, records, and backlog, and recovery then keeps it on hc because the record names hc; its header owns the sequence and its refusals.
-It refuses a remote second mate.
-Lifecycle control of an hc second mate (`bin/fm-control.sh <id> exit` and `relaunch`) is refused; the ship and scout support above does not extend to second mates.
-So a move cannot stop a live hc mate, and moving one off hc refuses before anything changes.
+A remote second mate moves onto its own host's hc core instead, as [Move a remote second mate onto hc](remote-secondmates.md#move-a-remote-second-mate-onto-hc) describes.
+A local hc second mate becomes a remote route on the same machine's core, keeping its home in place, as [Convert a local second mate to a remote route](remote-secondmates.md#convert-a-local-second-mate-to-a-remote-route) describes.
+Lifecycle control of an hc second mate (`bin/fm-control.sh <id> interrupt`, `exit`, and `relaunch`) uses the same control plane, postconditions, and refusals as a ship or scout task on hc.
+A `relaunch` keeps the mate's terminal and launches the replacement with the same Firstmate launch wiring a fresh spawn uses, including omp's `--config`.
+
+A remote second mate can run on hc on its host: [Remote second mates](remote-secondmates.md#launch-or-recover) owns its placement, its readiness, and the rule that Firstmate never starts, stops, or restarts the host's core.
+The host-side launch is this same second-mate launch, run by the remote job worker against the core the remote home's [`config/hc-session`](configuration.md#remote-hc-core-confighc-session) names.
+Its terminal's `firstmate.home` label is the host code root's tag, because the host-local launch runs from that code root, and every host-side read checks the label against that same tag.
 
 ## Limits
 
@@ -142,7 +147,10 @@ So a move cannot stop a live hc mate, and moving one off hc refuses before anyth
   `bin/fm-spawn.sh` pastes and submits the spawn launch line with `hc send` and consumes the Enter that follows it.
 - Submitting a message uses one bounded `hc send --wait`.
   A started turn or a still-working wait confirms it natively; otherwise the adapter falls back to the composer screen, with Enter retries only for a proven pending composer.
-  A blocked terminal (exit 9) returns `unknown` without typing or retrying and is never forced.
+  hc refuses `hc send` (exit 9) to a terminal whose status is `blocked`, and `bin/fm-osc7501.sh` publishes a worker's open `needs-decision` or `blocked` status line as exactly that status.
+  The adapter repeats a refused send with `--force` only when the blocked record is Firstmate's own (`app=firstmate-*`) and one screen read proves an empty composer with no recognized dialog.
+  Any other blocked terminal, including one whose program reported the block itself, returns `unknown` without typing or retrying.
+  `hc keys` is never refused, so Enter retries and interrupts need no force.
 - hc reports one foreground process per terminal.
   When that process is a launcher, the adapter also reads the rest of its process group from `ps`, which works only for terminals on the local machine.
 - Right after a terminal starts, `hc get` can report no foreground process yet, and agent state reads `unreadable` until the shell is up.

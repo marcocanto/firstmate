@@ -260,6 +260,18 @@ case "${FM_FAKE_SSH_MODE:-normal}:$command_name:$command_rel" in
     printf 'harness=codex\n'
     exit 0
     ;;
+  launch-hc-route:fm-remote-secondmate-control.sh:*|launch-hc-mismatched-route:fm-remote-secondmate-control.sh:*)
+    [ "$_command_action" = launch ] || exit 93
+    printf 'schema=fm-remote-secondmate-control.v1\n'
+    printf 'backend=hc\n'
+    case "$FM_FAKE_SSH_MODE" in
+      launch-hc-route) printf 'target=fmlab:t7\n' ;;
+      *) printf 'target=default:t7\n' ;;
+    esac
+    printf 'hc_session=fmlab\n'
+    printf 'harness=codex\n'
+    exit 0
+    ;;
   provision-block-fail:fm-remote-home-provision.sh:*)
     touch "$FM_FAKE_SEED_ENTERED"
     while [ ! -f "$FM_FAKE_SEED_RELEASE" ]; do sleep 0.02; done
@@ -608,6 +620,26 @@ assert_absent "$TMP_ROOT/seed-parent/data/seed-toolless/brief.md" \
 doctor-human --fix
 doctor-human -' ] || fail "the seed did not run the check, repair, re-check sequence"$'\n'"$(cat "$DOCTOR_LOG")"
 pass "remote seeding checks, repairs, and re-checks readiness, then stops on a remaining gap"
+
+# --backend gates provisioning on the backend the route will launch on, so an
+# hc route never depends on the `any` resolution, which never selects hc.
+: > "$DOCTOR_LOG"
+if FM_SECONDMATE_CHARTER='hc host charter.' FM_SECONDMATE_SCOPE='hc host' \
+  FM_FAKE_SSH_MODE=doctor-human seed_env "$ROOT/bin/fm-remote-home-seed.sh" \
+  seed-hc remote-mac "$REMOTE_ROOT" "$TMP_ROOT/seed-hc-home" --backend hc --no-projects \
+  > "$TMP_ROOT/seed-hc.out" 2>&1; then
+  fail "seeding proceeded against a host whose hc readiness failed"
+fi
+[ "$(cat "$DOCTOR_LOG")" = 'doctor-human --backend
+doctor-human --fix
+doctor-human --backend' ] || fail "the seed did not gate on the named backend"$'\n'"$(cat "$DOCTOR_LOG")"
+assert_absent "$TMP_ROOT/seed-hc-home" "the seed provisioned a home despite a failing hc preflight"
+if seed_env "$ROOT/bin/fm-remote-home-seed.sh" seed-hc remote-mac "$REMOTE_ROOT" "$TMP_ROOT/seed-hc-home" \
+  --backend tmux --no-projects > "$TMP_ROOT/seed-badbackend.out" 2>&1; then
+  fail "seeding accepted a backend no remote route can run on"
+fi
+assert_grep '--backend must be herdr, rex, or hc' "$TMP_ROOT/seed-badbackend.out" "an unknown seed backend was not refused by name"
+pass "remote seeding gates readiness on the backend the route names"
 
 # The same gate must accept a host whose only gaps were repairable.
 : > "$DOCTOR_LOG"
@@ -1513,12 +1545,12 @@ assert_grep 'not ready' "$TMP_ROOT/spawn-rex-old-doctor.out" \
 cmp -s "$TMP_ROOT/parent-ios-before-old-rex.meta" "$PARENT/state/ios.meta" \
   || fail "the refused rex spawn rewrote the recorded route"
 
-# An explicit backend outside {herdr, rex} is refused before any remote call.
+# An explicit backend outside {herdr, rex, hc} is refused before any remote call.
 ssh_before=$(cat "$SSH_COUNT")
 if remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate --backend tmux >"$TMP_ROOT/spawn-tmux-backend.out" 2>&1; then
   fail "an unknown remote backend was accepted"
 fi
-assert_grep 'runs only on the herdr or rex backend' "$TMP_ROOT/spawn-tmux-backend.out" \
+assert_grep 'runs only on the herdr, rex, or hc backend' "$TMP_ROOT/spawn-tmux-backend.out" \
   "an unknown remote backend did not fail with the backend refusal"
 [ "$(cat "$SSH_COUNT")" = "$ssh_before" ] || fail "an unknown remote backend still made a remote call"
 
@@ -1542,6 +1574,21 @@ assert_grep 'malformed Rex route metadata' "$TMP_ROOT/spawn-rex-mismatched.out" 
   "a session-mismatched rex route did not fail with the rex metadata refusal"
 cmp -s "$TMP_ROOT/parent-ios-pre-launch.meta" "$PARENT/state/ios.meta" \
   || fail "a refused rex session route rewrote the recorded route"
+if FM_FAKE_SSH_MODE=launch-hc-mismatched-route remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate --backend hc \
+  >"$TMP_ROOT/spawn-hc-mismatched.out" 2>&1; then
+  fail "an hc route whose target is outside its reported session was accepted"
+fi
+assert_grep 'malformed hc route metadata' "$TMP_ROOT/spawn-hc-mismatched.out" \
+  "a session-mismatched hc route did not fail with the hc metadata refusal"
+cmp -s "$TMP_ROOT/parent-ios-pre-launch.meta" "$PARENT/state/ios.meta" \
+  || fail "a refused hc route rewrote the recorded route"
+FM_FAKE_SSH_MODE=launch-hc-route remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate --backend hc \
+  >"$TMP_ROOT/spawn-hc.out" 2>&1 \
+  || fail "a well-formed remote hc route was refused: $(cat "$TMP_ROOT/spawn-hc.out")"
+assert_grep 'remote_backend=hc' "$PARENT/state/ios.meta" "the hc launch did not record its backend"
+assert_grep 'remote_hc_session=fmlab' "$PARENT/state/ios.meta" "the hc launch did not record its core session"
+assert_grep 'remote_target=fmlab:t7' "$PARENT/state/ios.meta" "the hc launch did not record its terminal"
+cp "$TMP_ROOT/parent-ios-pre-launch.meta" "$PARENT/state/ios.meta"
 pass "remote secondmate backend selection is strict on both sides of the boundary"
 
 # The remote host itself launches on rex: with no recorded endpoint (a

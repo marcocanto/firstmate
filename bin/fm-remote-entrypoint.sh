@@ -14,6 +14,12 @@
 # console-login diagnostic. Linux uses the same queue and worker shape without
 # an Aqua requirement.
 #
+# Isolated runs (tests and live labs on an account whose real worker and
+# entrypoint link belong to a live fleet) pass three env-only knobs through to
+# the doctor: FM_REMOTE_JOB_STATE_ROOT and FM_REMOTE_JOB_PLATFORM_OVERRIDE
+# (bin/fm-remote-job-lib.sh), and FM_REMOTE_ENTRYPOINT_LINK
+# (bin/fm-remote-doctor.sh). Unset, each keeps its account default.
+#
 # stdin is captured as bounded job input. The completed worker result is relayed
 # with stdout and stderr kept separate and its exit status preserved. An SSH
 # disconnect remains unknown completion to fm-on.sh, which preserves OpenSSH's
@@ -31,7 +37,7 @@
 set -eu
 
 PROTOCOL=1
-DOCTOR_SHA256=9c0795f18dbf0bc01aaf76b774cb614070a1ddd51889ccb79b74fa6b70ad6d33
+DOCTOR_SHA256=84a7c8d156ed197ebef3c809c10deb5b18215a697945aad901f95d395db56feb
 REAL_SOURCE=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}" 2>/dev/null) ||
   REAL_SOURCE=$(realpath "${BASH_SOURCE[0]}" 2>/dev/null) ||
   REAL_SOURCE=${BASH_SOURCE[0]}
@@ -166,6 +172,9 @@ if [ "$COMMAND" = fm-remote-doctor.sh ]; then
   fi
   if [ -n "${FM_REMOTE_JOB_STATE_ROOT:-}" ]; then
     DOCTOR_ENV+=("FM_REMOTE_JOB_STATE_ROOT=$FM_REMOTE_JOB_STATE_ROOT")
+  fi
+  if [ -n "${FM_REMOTE_ENTRYPOINT_LINK:-}" ]; then
+    DOCTOR_ENV+=("FM_REMOTE_ENTRYPOINT_LINK=$FM_REMOTE_ENTRYPOINT_LINK")
   fi
   trap - EXIT
   rm -rf -- "$TMP"

@@ -341,6 +341,20 @@ assert_contains "$out" 'entrypoint=yes' "the remote doctor did not detect its en
 assert_contains "$out" 'required git=' "the remote doctor did not report the required tool"
 pass "the remote doctor reports the same PATH the entrypoint hands its children"
 
+# FM_REMOTE_ENTRYPOINT_LINK crosses the entrypoint into the doctor bootstrap,
+# so an isolated run checks its own link instead of the account's real one.
+LAB_LINK="$TMP_ROOT/lab-link/fm-remote-entrypoint.sh"
+set +e
+out=$(FM_REMOTE_ENTRYPOINT_LINK="$LAB_LINK" fm_on ios fm-remote-doctor.sh 2>/dev/null)
+set -e
+assert_contains "$out" "check entrypoint-link=fixable: no entrypoint symlink at $LAB_LINK" \
+  "the entrypoint did not hand FM_REMOTE_ENTRYPOINT_LINK to the doctor"
+set +e
+out=$(fm_on ios fm-remote-doctor.sh 2>/dev/null)
+set -e
+assert_not_contains "$out" "$LAB_LINK" "the entrypoint link override outlived the run that set it"
+pass "the entrypoint passes FM_REMOTE_ENTRYPOINT_LINK to the doctor bootstrap only when set"
+
 fm_on ios fm-probe-two.sh >/dev/null
 : > "$TOOL_PROBE_LOG"
 set +e
