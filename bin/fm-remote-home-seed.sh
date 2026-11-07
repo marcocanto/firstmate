@@ -2,7 +2,7 @@
 # Register and provision a whole secondmate home on an SSH-reachable host.
 #
 # Usage:
-#   fm-remote-home-seed.sh <id> <ssh-alias> <remote-root> <remote-home> {<project>[=<origin-url>]...|--no-projects}
+#   fm-remote-home-seed.sh <id> <ssh-alias> <remote-root> <remote-home> [--backend herdr|rex|hc] {<project>[=<origin-url>]...|--no-projects}
 #
 # The SSH alias must already reach a host whose non-interactive PATH exposes the
 # fixed fm-remote-entrypoint.sh from <remote-root>. The command records the
@@ -10,6 +10,8 @@
 # fm-remote-doctor.sh readiness before touching it, sends a bounded provisioning
 # manifest through fm-on.sh, and lets the remote host clone its own Firstmate
 # home and project origins. No project tree or secret environment is copied.
+# --backend gates readiness on the backend the route will launch on; without
+# it the doctor's `any` resolution applies, which never selects hc.
 #
 # Each project needs an origin the remote account can clone. Firstmate resolves
 # that origin and names it as <project>=<origin-url>, so seeding never requires
@@ -46,7 +48,7 @@ MAX_MANIFEST_BYTES=1048576
 . "$SCRIPT_DIR/fm-project-origin-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 encode() { base64 | tr -d '\n'; }
 safe_id() { case "$1" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac; }
 
@@ -80,6 +82,14 @@ done
 case "$REMOTE_HOME/" in "$REMOTE_ROOT/"*) die "remote home must not be inside the remote code root" ;; esac
 case "$REMOTE_ROOT/" in "$REMOTE_HOME/"*) die "remote code root must not be inside the remote home" ;; esac
 
+SEED_BACKEND=any
+if [ "${1:-}" = --backend ]; then
+  case "${2:-}" in
+    herdr|rex|hc) SEED_BACKEND=$2 ;;
+    *) die "--backend must be herdr, rex, or hc" ;;
+  esac
+  shift 2
+fi
 NO_PROJECTS=0
 PROJECT_NAMES=()
 PROJECT_ORIGINS=()
@@ -240,7 +250,7 @@ restore_registry_and_brief() {
 # created on that host. The doctor runs through the same fixed entrypoint as
 # every later call, so it sees the exact PATH the remote home will run under.
 set +e
-fm_remote_readiness_ensure "$SCRIPT_DIR" "$ID"
+fm_remote_readiness_ensure "$SCRIPT_DIR" "$ID" "$SEED_BACKEND"
 PREFLIGHT_RC=$?
 set -e
 if [ "$PREFLIGHT_RC" -ne 0 ]; then

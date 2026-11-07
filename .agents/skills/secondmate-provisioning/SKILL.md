@@ -67,7 +67,7 @@ bin/fm-home-seed.sh <id> <home|-> {<project>...|--no-projects}
 Provision a whole remote home through its configured SSH host with:
 
 ```sh
-bin/fm-remote-home-seed.sh <id> <ssh-alias> <remote-root> <remote-home> {<project>[=<origin-url>]...|--no-projects}
+bin/fm-remote-home-seed.sh <id> <ssh-alias> <remote-root> <remote-home> [--backend herdr|rex|hc] {<project>[=<origin-url>]...|--no-projects}
 ```
 
 You resolve each project's origin yourself - from the captain, the project registry, a clone that exists elsewhere, `gh-axi`, or an explicit paste - and name it as `<project>=<origin-url>`; the seed validates and transports what you supply.

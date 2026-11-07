@@ -1134,20 +1134,45 @@ test_move_relaunches_an_already_stopped_tmux_secondmate_on_hc() {
   pass "move: an already-stopped tmux secondmate is relaunched on hc without lifecycle input"
 }
 
-# add_move_remote <w> <state>: places sm1 on a remote host whose stubbed state
-# probe reports <state>; every ssh call is logged, so a refusal that never
-# contacts the host leaves ssh.log empty.
-add_move_remote() {  # <w> <remote agent state the host reports>
-  local w=$1 remote_state=$2 sshbin
-  printf 'remote_host=lab-host\nremote_backend=herdr\nremote_herdr_session=fm-remote\nremote_target=fm-remote:w1:p1\n' >> "$w/home/state/sm1.meta"
+# add_move_remote <w> <backend> <state> [doctor-mode]: places sm1 on a remote
+# host whose recorded endpoint runs on <backend>. The fake host answers the
+# readiness doctor (ready, unready, or unreachable), reports <state> for the
+# endpoint, turns `control exit` into a dead endpoint, accepts move-release and
+# move-settle, and refuses every other command, so a move's relaunch on the
+# host fails. Every host command is logged to ssh.log.
+add_move_remote() {  # <w> <backend> <state> [ready|unready|unreachable]
+  local w=$1 backend=$2 remote_state=$3 doctor=${4:-ready} sshbin route
+  case "$backend" in
+    hc) route='remote_hc_session=default\nremote_target=default:t1\n' ;;
+    *) route='remote_herdr_session=fm-remote\nremote_target=fm-remote:w1:p1\n' ;;
+  esac
+  # shellcheck disable=SC2059 # the route is a fixed escape-bearing format
+  printf "remote_host=lab-host\nremote_backend=$backend\n$route" >> "$w/home/state/sm1.meta"
   mkdir -p "$w/home/data"
   printf -- '- sm1 - Remote mate (host: lab-host; root: /remote/root; home: /remote/sm1-home; scope: remote work; projects: alpha; added 2026-01-01)\n' \
     > "$w/home/data/secondmates.md"
+  printf '%s\n' "$remote_state" > "$w/remote-state"
   sshbin=$(fm_fakebin "$w/ssh-tools")
   cat > "$sshbin/ssh" <<SH
 #!/usr/bin/env bash
-printf '%s\n' "\$*" >> '$w/ssh.log'
-printf '%s\n' '$remote_state'
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in -o) shift 2 ;; --) shift; break ;; *) break ;; esac
+done
+shift 2
+fields=\$(perl -MMIME::Base64=decode_base64 -e 'print join(" ", split(/\0/, decode_base64(\$ARGV[0])))' "\$4")
+printf '%s\n' "\$fields" >> '$w/ssh.log'
+case "\$fields" in
+  fm-remote-doctor.sh*)
+    case '$doctor' in
+      unreachable) exit 255 ;;
+      unready) printf 'check hc-core=human: no hc core answers for session default on this account\n'; exit 1 ;;
+    esac
+    printf 'ready\n' ;;
+  "fm-remote-secondmate-control.sh state "*) cat '$w/remote-state' ;;
+  "fm-remote-secondmate-control.sh control sm1 exit") printf 'dead\n' > '$w/remote-state'; printf 'exited sm1\n' ;;
+  "fm-remote-secondmate-control.sh move-release "*|"fm-remote-secondmate-control.sh move-settle "*) printf 'ok\n' ;;
+  *) printf 'error: the fake host refuses %s\n' "\$fields" >&2; exit 1 ;;
+esac
 SH
   chmod +x "$sshbin/ssh"
   W_PATH="$sshbin:$W_PATH"
@@ -1155,7 +1180,7 @@ SH
 
 test_move_refuses_before_stopping_anything() {
   local scenario out rc before args
-  for scenario in cmux unknown same-backend harness-mismatch missing-hc remote-dead remote-alive unreadable pending-composer; do
+  for scenario in cmux unknown same-backend harness-mismatch missing-hc remote-not-hc remote-same remote-unreachable remote-unready unreadable pending-composer; do
     move_world "move-refuse-$scenario" claude
     args=(sm1 --backend hc)
     case "$scenario" in
@@ -1164,8 +1189,10 @@ test_move_refuses_before_stopping_anything() {
       same-backend) args=(sm1 --backend tmux) ;;
       harness-mismatch) args=(sm1 --backend t3code); printf 'pi\n' > "$W_DIR/home/config/secondmate-harness" ;;
       missing-hc) W_HCBIN="$W_DIR/no-such-dir/hc" ;;
-      remote-dead) add_move_remote "$W_DIR" dead ;;
-      remote-alive) add_move_remote "$W_DIR" alive ;;
+      remote-not-hc) add_move_remote "$W_DIR" herdr alive; args=(sm1 --backend tmux) ;;
+      remote-same) add_move_remote "$W_DIR" hc alive ;;
+      remote-unreachable) add_move_remote "$W_DIR" herdr alive unreachable ;;
+      remote-unready) add_move_remote "$W_DIR" herdr alive unready ;;
       unreadable) : > "$W_MV/unreadable" ;;
       pending-composer) printf '❯ draft text\n' > "$W_MV/pane" ;;
     esac
@@ -1185,9 +1212,21 @@ test_move_refuses_before_stopping_anything() {
       same-backend) assert_contains "$out" "already recorded on backend=tmux" "a same-backend move points at relaunch" ;;
       harness-mismatch) assert_contains "$out" "runs only the claude and codex harnesses" "a target that cannot launch the mate's configured harness refuses before any stop" ;;
       missing-hc) assert_contains "$out" "backend=hc needs 'hc', which is not available here; nothing was stopped or moved" "a missing target binary refuses before any stop" ;;
-      remote-dead|remote-alive)
-        assert_contains "$out" "a local move is refused; nothing was stopped or moved" "a remote mate is refused before anything is stopped"
-        [ ! -s "$W_DIR/ssh.log" ] || fail "$scenario: a remote mate must be refused without contacting its host: $(cat "$W_DIR/ssh.log")"
+      remote-not-hc|remote-same)
+        case "$scenario" in
+          remote-not-hc) assert_contains "$out" "moves only onto its host's hc core, not backend=tmux; nothing was stopped or moved" "a remote move to another backend is refused" ;;
+          remote-same) assert_contains "$out" "already recorded on backend=hc on lab-host" "a remote same-backend move points at relaunch" ;;
+        esac
+        [ ! -s "$W_DIR/ssh.log" ] || fail "$scenario: the refusal must not contact the host: $(cat "$W_DIR/ssh.log")"
+        ;;
+      remote-unreachable|remote-unready)
+        case "$scenario" in
+          remote-unreachable) assert_contains "$out" "remote host lab-host is unreachable or its readiness is unknown; nothing was stopped or moved" "an unreachable host is refused" ;;
+          remote-unready) assert_contains "$out" "is not ready for backend=hc (check hc-core=human: no hc core answers" "an unready target core is refused by name" ;;
+        esac
+        if grep -v '^fm-remote-doctor.sh' "$W_DIR/ssh.log" | grep -q .; then
+          fail "$scenario: only the readiness doctor may reach the host: $(cat "$W_DIR/ssh.log")"
+        fi
         ;;
       unreadable) assert_contains "$out" "cannot be classified" "an unreadable endpoint refuses before any stop" ;;
       pending-composer) assert_contains "$out" "could not be proven stopped" "a refused stop ends the move" ;;
@@ -1211,6 +1250,28 @@ test_move_restores_the_previous_record_when_the_launch_fails() {
   assert_not_contains "$out" "moved sm1" "a failed launch must not report a move"
   assert_grep 'failed' "$W_DIR/home/state/.secondmate-relaunch-sm1" "the move must record its failed outcome"
   pass "move: a failed replacement launch leaves the previous record in place for recovery and says so"
+}
+
+test_move_remote_stops_releases_and_restores_when_the_hc_launch_fails() {
+  local out rc=0 seq
+  move_world move-remote-launch-fails claude
+  add_move_remote "$W_DIR" herdr alive
+  cp -p "$W_DIR/home/state/sm1.meta" "$W_DIR/before.meta"
+  out=$(run_move sm1 --backend hc) || rc=$?
+  expect_code 1 "$rc" "a remote move whose hc launch fails must fail"$'\n'"$out"
+  seq=$(cut -d' ' -f1-4 "$W_DIR/ssh.log" | grep -v '^fm-remote-doctor.sh' | grep -v ' state sm1' | grep -v -e ' sync ' -e '^fm-remote-inherit')
+  assert_contains "$seq" "fm-remote-secondmate-control.sh control sm1 exit" "the live remote agent must be stopped on its host first"
+  assert_contains "$seq" "fm-remote-secondmate-control.sh move-release sm1 herdr" "the stopped endpoint must be released from its recorded backend"
+  assert_contains "$seq" "fm-remote-secondmate-control.sh move-settle sm1 restore" "a failed launch must restore the host's previous record"
+  assert_not_contains "$seq" "move-settle sm1 drop" "a failed launch must not drop the host's previous record"
+  [ "$(printf '%s\n' "$seq" | grep -n 'control sm1 exit' | cut -d: -f1)" -lt "$(printf '%s\n' "$seq" | grep -n 'move-release' | cut -d: -f1)" ] \
+    || fail "the release must follow the proven stop: $seq"
+  cmp -s "$W_DIR/before.meta" "$W_DIR/home/state/sm1.meta" \
+    || fail "a failed remote launch must leave the parent record byte-identical"$'\n'"$(diff "$W_DIR/before.meta" "$W_DIR/home/state/sm1.meta")"
+  assert_contains "$out" "could not be launched on hc on lab-host; its previous record (backend=herdr) is in place" \
+    "the failure must say the previous record survived"
+  [ ! -s "$W_LOG" ] && [ ! -s "$W_MV/literal" ] || fail "a remote move must not touch any local endpoint"
+  pass "move: a live remote mate is stopped and released on its host, and a failed hc launch restores both records"
 }
 
 test_move_leaves_a_newer_record_in_place_when_the_launch_fails() {
@@ -1587,6 +1648,7 @@ test_move_stops_a_live_tmux_secondmate_and_relaunches_it_on_hc
 test_move_relaunches_an_already_stopped_tmux_secondmate_on_hc
 test_move_refuses_before_stopping_anything
 test_move_restores_the_previous_record_when_the_launch_fails
+test_move_remote_stops_releases_and_restores_when_the_hc_launch_fails
 test_move_leaves_a_newer_record_in_place_when_the_launch_fails
 test_move_names_the_stopped_state_when_the_relaunch_is_skipped
 test_move_usage_prints_the_exit_status_contract

@@ -333,6 +333,15 @@ fm_backend_detect_hc_core_sock() {
   fi
 }
 
+# fm_backend_hc_core_live: <session>'s core is accepting connections right
+# now, proven by a unix connect to the socket fm_backend_detect_hc_core_sock
+# resolves for it, never by an `hc` call, which would start a missing core.
+# The remote second-mate control plane and readiness doctor use it so that no
+# probe they run can start a core outside the account's GUI session.
+fm_backend_hc_core_live() {  # <session>
+  fm_backend_unix_sock_live "$(HC_SESSION=$1 fm_backend_detect_hc_core_sock)"
+}
+
 # fm_backend_detect_herdr_app_terminal: this process's own terminal record
 # carries a non-empty herdr.space label, the exact condition the app uses to
 # show a terminal in the window. The caller has already proven

@@ -78,6 +78,44 @@ fm_backend_hc_session() {
   printf '%s' "${HC_SESSION:-default}"
 }
 
+# fm_backend_hc_remote_session: the hc session a remote second mate's home
+# places its agent on (docs/remote-secondmates.md "Launch or recover"). The
+# remote job worker runs every host command under `env -i`, so no HC_SESSION
+# reaches it; the home's own config/hc-session carries the choice instead, and
+# an absent file means the account's `default` core, the one Herdr.app binds.
+# Prints the session, or fails on a file whose first line is not one valid name.
+fm_backend_hc_remote_session() {  # <home>
+  local file=$1/config/hc-session session
+  if [ ! -e "$file" ] && [ ! -L "$file" ]; then
+    printf 'default'
+    return 0
+  fi
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  session=$(head -n 1 "$file" 2>/dev/null | tr -d '[:space:]') || return 1
+  fm_backend_hc_atom_valid "$session" || return 1
+  printf '%s' "$session"
+}
+
+# fm_backend_hc_version_at_least: <x.y.z> is at or above the verified floor.
+fm_backend_hc_version_at_least() {  # <x.y.z>
+  local ver=$1 major rest minor patch fmaj fmin fpat
+  major=${ver%%.*}
+  rest=${ver#*.}
+  minor=${rest%%.*}
+  case "$rest" in
+    *.*) patch=${rest#*.} ;;
+    *) patch=0 ;;
+  esac
+  patch=${patch%%[^0-9]*}
+  case "$major" in ''|*[!0-9]*) major=0 ;; esac
+  case "$minor" in ''|*[!0-9]*) minor=0 ;; esac
+  case "$patch" in ''|*[!0-9]*) patch=0 ;; esac
+  IFS=. read -r fmaj fmin fpat <<EOF
+$FM_BACKEND_HC_MIN_VERSION
+EOF
+  [ $((major * 1000000 + minor * 1000 + patch)) -ge $((fmaj * 1000000 + fmin * 1000 + fpat)) ]
+}
+
 # fm_backend_hc_bin: the resolved herdr-core binary path, or failure. The
 # release asset's own name is `herdr-core`; `hc` is its CLI alias. FM_HC_BIN
 # wins so tests and the lab can pin a build; version_check still proves the
@@ -94,7 +132,7 @@ fm_backend_hc_bin() {
 # fm_backend_hc_version_check: refuse loudly on a missing, misnamed, or
 # older-than-verified binary. `<bin> --version` must print `hc x.y.z`.
 fm_backend_hc_version_check() {
-  local bin raw ver major rest minor patch cur min fmaj fmin fpat
+  local bin raw ver
   bin=$(fm_backend_hc_bin) || {
     echo "error: backend=hc selected but no 'herdr-core' or 'hc' binary was found on PATH (install Herdr Core per docs/hc-backend.md or set FM_HC_BIN)" >&2
     return 1
@@ -111,23 +149,7 @@ fm_backend_hc_version_check() {
       return 1
       ;;
   esac
-  major=${ver%%.*}
-  rest=${ver#*.}
-  minor=${rest%%.*}
-  case "$rest" in
-    *.*) patch=${rest#*.} ;;
-    *) patch=0 ;;
-  esac
-  patch=${patch%%[^0-9]*}
-  case "$major" in ''|*[!0-9]*) major=0 ;; esac
-  case "$minor" in ''|*[!0-9]*) minor=0 ;; esac
-  case "$patch" in ''|*[!0-9]*) patch=0 ;; esac
-  IFS=. read -r fmaj fmin fpat <<EOF
-$FM_BACKEND_HC_MIN_VERSION
-EOF
-  cur=$((major * 1000000 + minor * 1000 + patch))
-  min=$((fmaj * 1000000 + fmin * 1000 + fpat))
-  if [ "$cur" -lt "$min" ]; then
+  if ! fm_backend_hc_version_at_least "$ver"; then
     echo "error: herdr-core $ver is older than the verified minimum $FM_BACKEND_HC_MIN_VERSION; update herdr-core before using backend=hc" >&2
     return 1
   fi

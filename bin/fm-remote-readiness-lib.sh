@@ -11,12 +11,12 @@
 # owner of every check, every repair, and every message; nothing here restates
 # them.
 #
-# <backend> is herdr, rex, or any (the default). A concrete backend is passed
-# to the doctor's --backend flag; `any` invokes it bare, which resolves
+# <backend> is herdr, rex, hc, or any (the default). A concrete backend is
+# passed to the doctor's --backend flag; `any` invokes it bare, which resolves
 # whichever supported backend that host provides. A remote still on the
 # herdr-only doctor exits 2 on the unknown flag; an explicit herdr request then
-# retries without it, whose only selectable backend there is herdr. rex has no
-# such fallback: a remote that old cannot run it.
+# retries without it, whose only selectable backend there is herdr. rex and hc
+# have no such fallback: a remote that old cannot run them.
 #
 # <harness> is the runtime the launch or recovery will use. omp is the only
 # runtime with its own doctor check, so only omp is forwarded (--harness omp);
