@@ -127,9 +127,9 @@ move_cleanup() {
   [ -z "$SNAPSHOT" ] || rm -f "$SNAPSHOT"
   # An exit during a conversion that did not go through cv_fail still puts
   # the previous local route back (cv_restore is a no-op once settled).
-  # One interrupted after the remote launch published a record is kept, as
-  # the launch failure path keeps it.
-  if [ "${CV_ACTIVE:-0}" = 1 ] && [ "${CV_LAUNCHING:-0}" = 1 ] && cv_launch_landed; then
+  # One interrupted during the remote launch is kept: the host may still
+  # finish it, as the launch failure path keeps an unknown completion.
+  if [ "${CV_ACTIVE:-0}" = 1 ] && [ "${CV_LAUNCHING:-0}" = 1 ]; then
     CV_ACTIVE=0
     CV_KEEP=1
     echo "error: second mate $ID may already run on $CONVERT_HOST, but the conversion was interrupted during its launch; its remote route is kept, so run 'bin/fm-spawn.sh $ID --secondmate' to finish recording it; the previous local record and the conversion's snapshots are at $CV_META_ASIDE and $CV_STAGE" >&2
@@ -289,12 +289,6 @@ CV_RESTORE_NOTES=
 
 cv_note() {  # <text>: one restore step that could not be completed
   CV_RESTORE_NOTES="${CV_RESTORE_NOTES}${CV_RESTORE_NOTES:+; }$1"
-}
-
-# cv_launch_landed: the remote launch has published a record, on the parent or
-# in the home, so undoing the conversion would put a second agent beside it.
-cv_launch_landed() {
-  [ -f "$META" ] || [ -f "$CV_HOME/state/parent-route/$ID.meta" ]
 }
 
 # cv_restore: undo every applied conversion step, newest first, leaving the
@@ -673,7 +667,7 @@ remote_convert() {
   # A launch the host completed, or may have completed, is never undone from
   # here: restoring the local route would put a second agent beside the remote
   # one.
-  if [ "$spawn_rc" -eq 255 ] || cv_launch_landed; then
+  if [ "$spawn_rc" -eq 255 ] || [ -f "$META" ] || [ -f "$home/state/parent-route/$ID.meta" ]; then
     CV_ACTIVE=0
     CV_KEEP=1
     die "second mate $ID may already run on $CONVERT_HOST, but its launch did not finish cleanly ($(first_line "$out")); its remote route is kept, so run 'bin/fm-spawn.sh $ID --secondmate' to finish recording it; the previous local record and the conversion's snapshots are at $CV_META_ASIDE and $CV_STAGE"
