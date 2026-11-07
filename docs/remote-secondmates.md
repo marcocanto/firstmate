@@ -494,7 +494,8 @@ The promised-public-reply subsystem is same-filesystem by construction, so a rem
 
 ### Local and remote routes together
 
-Local secondmates keep the existing route form and need no migration.
+Local secondmates keep the existing route form, and a local route needs no migration to keep working.
+To turn one into a remote route on the machine that holds its home, see [Convert a local second mate to a remote route](#convert-a-local-second-mate-to-a-remote-route).
 A fleet may contain local and remote routes together.
 Use `bin/fm-home-seed.sh validate` to validate either form.
 
@@ -785,6 +786,36 @@ On success, `move-settle drop` discards the set-aside record and the move prints
 If the launch fails, `move-settle restore` puts the host's previous record back and the primary keeps its previous route record, so the next liveness recovery respawns the mate on its old backend.
 The [`bin/fm-secondmate-move.sh`](../bin/fm-secondmate-move.sh) header owns the sequence, and [`bin/fm-remote-secondmate-control.sh`](../bin/fm-remote-secondmate-control.sh) owns the host verbs.
 
+### Convert a local second mate to a remote route
+
+`bin/fm-secondmate-move.sh <id> --remote <ssh-alias> --root <code-root>` turns a local second mate of this home into a remote route on the same machine, keeping its home where it is.
+Use it before the primary home moves to another machine: the mate keeps its home, backlog, lanes, worktrees, and reports, and the moved primary supervises it over SSH like any remote route.
+`<ssh-alias>` must reach this account on this machine, and `<code-root>` is a separate Firstmate checkout on this machine whose entrypoint that alias runs ([Remote clone and entrypoint](#remote-clone-and-entrypoint)).
+The converted mate runs on this machine's hc core, in the session its home's `config/hc-session` names.
+
+These refusals all happen before anything is stopped, and leave the mate running and every record unchanged:
+
+- A mate that is already a remote route.
+- A home that is not a directory on this machine, or whose parent record names another parent home.
+- An alias whose host reports a different account or a different home, compared by user id and the home directory's device and inode through the host's `identity` verb.
+- A host the `--backend hc` readiness gate does not pass, or an alias that does not answer.
+- An unresolved routed request or an unfinished backlog handoff outbox.
+- A local hc mate whose core differs from the one its home's `config/hc-session` resolves to, a code root that is this parent home or not a Firstmate checkout, a per-mate account pin in this home, and records left by an earlier remote route.
+
+Then the conversion stops the agent through `bin/fm-control.sh <id> exit`, closes the old endpoint, and rewrites what [`bin/fm-remote-home-seed.sh`](../bin/fm-remote-home-seed.sh) would have produced, without cloning anything:
+
+1. The home's `.fm-secondmate-parent` becomes `route=remote` with the alias.
+2. The home's `data/charter.md` takes the remote form, naming the relay log and the parent-route inbox.
+3. The parent's `state/<id>.status` becomes the head of the home's `state/parent-replies.status`, and the reply mirror starts after it, so the old lines are neither lost nor mirrored a second time ([`bin/fm-procevent-remote-reply.sh`](../bin/fm-procevent-remote-reply.sh) `adopt`).
+4. The parent-side steering inbox, with its unread records and its `handled/` acknowledgements, moves to the home's `state/parent-route/<id>.inbox`.
+5. The registry entry takes the remote form.
+
+Finally it launches the mate with `bin/fm-spawn.sh <id> --secondmate --backend hc` and the harness, model, and effort the local record named, which publishes the remote record and arms the reply mirror.
+If that launch fails, every change above is undone and the previous local record is put back, so the next liveness recovery respawns the mate locally.
+A launch whose completion is unknown, or one the host completed while this home could not record it, keeps the remote route and names the command that finishes it, because restoring the local route would put a second agent beside the remote one.
+A Rex or T3 mate is refused, because its endpoint lives in a home-scoped server or thread; move it onto hc with `--backend hc` first.
+The [`bin/fm-secondmate-move.sh`](../bin/fm-secondmate-move.sh) header owns the sequence.
+
 ### Firstmate code convergence
 
 Session start and every remote launch converge the persistent remote home on the primary's own default-branch commit rather than on the Firstmate copy that host keeps.
@@ -862,6 +893,7 @@ bin/fm-test-run.sh tests/fm-remote-secondmate-trace-context.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-hc.test.sh
 bin/fm-test-run.sh tests/fm-remote-secondmate-relaunch.test.sh
 bin/fm-test-run.sh tests/fm-secondmate-liveness.test.sh
+bin/fm-test-run.sh tests/fm-secondmate-convert-remote.test.sh
 ```
 
 ### What the portable tests cannot prove
