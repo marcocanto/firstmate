@@ -764,7 +764,7 @@ Later recovery and restart reuse that republished record, so one relaunch is eno
 
 For a remote mate on hc, `bin/fm-control.sh <id> interrupt|exit|relaunch` on the primary drives that mate on its host.
 `interrupt` and `exit` run the host's `fm-remote-secondmate-control.sh control <id> <verb>`, which runs the ordinary control plane against the host's endpoint record and its proven postconditions.
-`relaunch` runs `bin/fm-remote-secondmate-relaunch.sh`, with each axis not given on the command line taken from the primary's route record; `--account` is refused because the mate's account pin lives in its remote home, and `--note` because a remote relaunch records no progress note.
+`relaunch` runs `bin/fm-remote-secondmate-relaunch.sh`, with each axis not given on the command line taken from the primary's route record, except that a `--harness` change resets an unspecified model or effort to `default`, because one chosen for the old harness does not transfer; `--account` is refused because the mate's account pin lives in its remote home, and `--note` because a remote relaunch records no progress note.
 A remote mate on Herdr or Rex is still refused by `bin/fm-control.sh`, because nothing on the primary could verify its lifecycle.
 
 ### Move a remote second mate onto hc
