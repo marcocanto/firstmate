@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034 # parsed fields are output globals for sourcing callers.
-# Parse the durable parent binding written into a seeded secondmate home.
+# Parse, write, and locate the durable parent binding of a seeded secondmate home.
 #
 # The fm-secondmate-parent.v1 record contains exactly one schema and route.
 # A local route contains exactly one absolute parent_home and no parent_host.
@@ -67,4 +67,38 @@ fm_secondmate_parent_record_parse() {
 
   FM_SECONDMATE_PARENT_ROUTE=$route
   FM_SECONDMATE_PARENT_HOST=$parent_host
+}
+
+# Publish the remote-route record at <file>: schema, route=remote, and the
+# diagnostic parent_host when one is known. The write is a rename, so a reader
+# sees the previous record or the new one, never a partial one.
+# bin/fm-remote-home-provision.sh writes it for a new remote home, and
+# bin/fm-secondmate-move.sh for a local mate converted to a remote route.
+fm_secondmate_parent_record_write_remote() {  # <file> [parent-host]
+  local file=$1 host=${2:-} tmp
+  tmp="$file.tmp.$$"
+  {
+    printf 'schema=fm-secondmate-parent.v1\n'
+    printf 'route=remote\n'
+    [ -z "$host" ] || printf 'parent_host=%s\n' "$host"
+  } > "$tmp" || { rm -f -- "$tmp"; return 1; }
+  mv -f -- "$tmp" "$file" || { rm -f -- "$tmp"; return 1; }
+}
+
+# The identity of a home on the machine that runs this: `uid=<account uid>`
+# and `home=<device>:<inode>` of the home directory, one per line. The remote
+# control plane's `identity` verb prints it on the host, and
+# bin/fm-secondmate-move.sh compares it with its own reading before converting
+# a local mate to a remote route on the same machine: the same uid and the
+# same device and inode prove the SSH alias reaches this account and this home,
+# not a same-named path on another machine.
+fm_secondmate_home_identity() {  # <home>
+  local home=$1 devino
+  if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+    devino=$(LC_ALL=C /usr/bin/stat -f '%d:%i' "$home" 2>/dev/null) || return 1
+  else
+    devino=$(LC_ALL=C stat -c '%d:%i' "$home" 2>/dev/null) || return 1
+  fi
+  [ -n "$devino" ] || return 1
+  printf 'uid=%s\nhome=%s\n' "$(id -u)" "$devino"
 }

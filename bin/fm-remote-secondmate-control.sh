@@ -7,6 +7,7 @@
 #   fm-remote-secondmate-control.sh control <id> {interrupt|exit}
 #   fm-remote-secondmate-control.sh move-release <id> <from-backend>
 #   fm-remote-secondmate-control.sh move-settle <id> {drop|restore}
+#   fm-remote-secondmate-control.sh identity <id>
 #   fm-remote-secondmate-control.sh state <id>
 #   fm-remote-secondmate-control.sh route <id>
 #   fm-remote-secondmate-control.sh send <id> <message> [fire-and-forget]
@@ -74,7 +75,10 @@
 # the ordinary host-local interrupt or exit the way `relaunch` runs its verb,
 # and the two move verbs let bin/fm-secondmate-move.sh retire an agent-free
 # endpoint on one backend before the parent's launch on another, then drop or
-# restore the set-aside endpoint record once that launch settles.
+# restore the set-aside endpoint record once that launch settles. `identity`
+# prints this account's uid and the device and inode of the home directory, so
+# a parent converting one of its own local mates to a remote route can prove
+# the SSH alias reaches this same account and the same home on its machine.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,7 +93,7 @@ REMOTE_HERDR_SESSION=fm-remote
 export FM_BACKEND_REX_NO_AUTOSTART=1
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 validate_id() { case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid secondmate id: $1" ;; esac; }
 
 # Sourcing fm-wake-lib.sh through the libraries below creates "$FM_HOME/state",
@@ -111,6 +115,8 @@ fi
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
 # shellcheck source=bin/fm-task-inbox-lib.sh
 . "$SCRIPT_DIR/fm-task-inbox-lib.sh"
+# shellcheck source=bin/fm-secondmate-parent-lib.sh
+. "$SCRIPT_DIR/fm-secondmate-parent-lib.sh"
 
 validate_home() { # <id>
   local id=$1 marker
@@ -284,6 +290,14 @@ print_route() { # <id>
   printf 'model=%s\n' "$model"
   printf 'effort=%s\n' "$effort"
   [ -z "$traceparent" ] || printf 'traceparent=%s\n' "$traceparent"
+}
+
+cmd_identity() {
+  local id=$1
+  validate_id "$id"
+  validate_home "$id"
+  printf 'schema=fm-remote-secondmate-control.v1\n'
+  fm_secondmate_home_identity "$TARGET_HOME" || die "the identity of this home could not be read"
 }
 
 cmd_route() {
@@ -745,6 +759,7 @@ case "${1:-}" in
   control) shift; [ "$#" -eq 2 ] || usage; cmd_control "$@" ;;
   move-release) shift; [ "$#" -eq 2 ] || usage; cmd_move_release "$@" ;;
   move-settle) shift; [ "$#" -eq 2 ] || usage; cmd_move_settle "$@" ;;
+  identity) shift; [ "$#" -eq 1 ] || usage; cmd_identity "$1" ;;
   state) shift; [ "$#" -eq 1 ] || usage; validate_id "$1"; validate_home "$1"; state_value "$1" ;;
   route) shift; [ "$#" -eq 1 ] || usage; cmd_route "$1" ;;
   send) shift; [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage; cmd_send "$@" ;;

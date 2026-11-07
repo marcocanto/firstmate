@@ -157,24 +157,10 @@ TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-remote-home-seed.XXXXXX") || die "cannot cre
 REG_EXISTED=0
 [ -f "$REG" ] && { cp "$REG" "$TMP/registry.before"; REG_EXISTED=1; }
 
-# Keep the parent charter as its durable source, but publish a remote copy whose
-# status path is the remote append-only relay log and whose steering-inbox path
-# is the host-local parent-route inbox the remote control plane writes to,
-# rather than local Mac paths. The two parents differ only by suffix, so the
-# two whole-string rewrites are order-independent and every mention - bare
-# path, /*.msg listing, and handled/ acknowledgement - lands host-local.
-# Each rewrite stays its own plain assignment: on stock macOS bash a quoted
-# substitution nested inside a double-quoted argument leaks literal quotes
-# into the replacement text.
-PARENT_STATUS="$STATE/$ID.status"
-REMOTE_STATUS="$REMOTE_HOME/state/parent-replies.status"
-PARENT_INBOX="$STATE/$ID.inbox"
-REMOTE_INBOX="$REMOTE_HOME/state/parent-route/$ID.inbox"
-while IFS= read -r line || [ -n "$line" ]; do
-  line=${line//"$PARENT_STATUS"/"$REMOTE_STATUS"}
-  line=${line//"$PARENT_INBOX"/"$REMOTE_INBOX"}
-  printf '%s\n' "$line"
-done < "$BRIEF" > "$TMP/charter.remote"
+# Keep the parent charter as its durable source, but publish its remote form
+# (secondmate_charter_remote_form), whose status and steering-inbox paths are
+# host-local rather than paths on this machine.
+secondmate_charter_remote_form "$BRIEF" "$STATE" "$ID" "$REMOTE_HOME" > "$TMP/charter.remote"
 
 PROJECTS_CSV=
 : > "$TMP/project.records"
