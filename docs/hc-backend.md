@@ -132,9 +132,13 @@ A terminal whose program finished reads `missing` while the core still lists it 
 A terminal already gone is simply respawned, and an alive mate is never touched.
 The respawn is `bin/fm-spawn.sh <id> --secondmate` on the mate's recorded backend, so a local hc second mate stays on hc whatever `config/backend` says.
 [`bin/fm-secondmate-move.sh`](../bin/fm-secondmate-move.sh) `<id> --backend hc` moves an existing local mate from another local backend onto hc while keeping its home, records, and backlog, and recovery then keeps it on hc because the record names hc; its header owns the sequence and its refusals.
-It refuses a remote second mate.
-Lifecycle control of an hc second mate (`bin/fm-control.sh <id> exit` and `relaunch`) is refused; the ship and scout support above does not extend to second mates.
-So a move cannot stop a live hc mate, and moving one off hc refuses before anything changes.
+A remote second mate moves onto its own host's hc core instead, as [Move a remote second mate onto hc](remote-secondmates.md#move-a-remote-second-mate-onto-hc) describes.
+Lifecycle control of an hc second mate (`bin/fm-control.sh <id> interrupt`, `exit`, and `relaunch`) uses the same control plane, postconditions, and refusals as a ship or scout task on hc.
+A `relaunch` keeps the mate's terminal and launches the replacement with the same Firstmate launch wiring a fresh spawn uses, including omp's `--config`.
+
+A remote second mate can run on hc on its host: [Remote second mates](remote-secondmates.md#launch-or-recover) owns its placement, its readiness, and the rule that Firstmate never starts, stops, or restarts the host's core.
+The host-side launch is this same second-mate launch, run by the remote job worker against the core the remote home's [`config/hc-session`](configuration.md#remote-hc-core-confighc-session) names.
+Its terminal's `firstmate.home` label is the host code root's tag, because the host-local launch runs from that code root, and every host-side read checks the label against that same tag.
 
 ## Limits
 

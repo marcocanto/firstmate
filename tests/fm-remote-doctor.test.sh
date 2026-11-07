@@ -1393,3 +1393,171 @@ assert_contains "$DOCTOR_OUT" 'check remote-job-worker=ok:' \
 assert_not_contains "$DOCTOR_OUT" 'check herdr-server=' "the herdr server was checked for rex on linux"
 [ ! -s "$CASE_LAUNCHCTL_LOG" ] || fail "the linux rex path invoked launchctl"
 pass "a Linux host verifies rex without any Aqua-specific requirement"
+
+
+# --- the hc backend: CLI and core version floors, an answering core, and the
+# core's GUI-session birth, with no repair that could start or stop a core ----
+
+# shellcheck source=tests/hc-fake-fixture.sh
+. "$(dirname "${BASH_SOURCE[0]}")/hc-fake-fixture.sh"
+unset HC_SESSION HC_SOCKET FM_HC_SOCKET FM_HC_BIN
+# AF_UNIX paths are capped near 104 bytes, so the core socket layout lives in
+# its own short directory, reached through XDG_STATE_HOME like hc itself does.
+HC_SOCK_ROOT=$(mktemp -d /tmp/fmdhc.XXXXXX)
+trap 'stop_hc_core_socket "$HC_SOCK_ROOT/none" 2>/dev/null || true; rm -rf "$HC_SOCK_ROOT"; if [ -n "$DOCTOR_WORKER_PID" ]; then kill "$DOCTOR_WORKER_PID" 2>/dev/null || true; fi; if [ "${#HOLDER_PIDS[@]}" -gt 0 ]; then kill "${HOLDER_PIDS[@]}" 2>/dev/null || true; fi; fm_test_cleanup || true' EXIT
+export XDG_STATE_HOME="$HC_SOCK_ROOT"
+HC_DEFAULT_SOCK="$HC_SOCK_ROOT/herdr-core/default/default.sock"
+
+# install_case_hc: put the stateful fake herdr-core on the case PATH. The case
+# runs the lab shape: a Darwin account whose job worker runs in Linux mode.
+install_case_hc() {
+  write_hc_fake_cli "$CASE_BIN/herdr-core" "$CASE_STATE/hcfake"
+  CASE_PLATFORM_OVERRIDE=Linux
+}
+
+hc_calls() { cat "$CASE_STATE/hcfake/log" 2>/dev/null | wc -l | tr -d ' '; }
+
+new_case Darwin no-herdr gui
+install_case_hc
+start_hc_core_socket "$HC_DEFAULT_SOCK"
+doctor --backend hc
+expect_code 0 "$DOCTOR_RC" "an hc host with a GUI-born core was not ready"$'\n'"$DOCTOR_OUT"
+assert_contains "$DOCTOR_OUT" 'required hc=' "the hc CLI was not reported as a required tool"
+assert_not_contains "$DOCTOR_OUT" 'required herdr=' "an hc verification still required the herdr CLI"
+assert_contains "$DOCTOR_OUT" 'check hc=ok:' "the fake hc CLI was not accepted"
+assert_contains "$DOCTOR_OUT" 'check hc-core=ok: session default answers (pid 4242, version 0.1.18)' \
+  "an answering core at the version floor was not accepted"
+assert_contains "$DOCTOR_OUT" 'check hc-core-context=ok:' "a core that reads the login keychain was not accepted"
+assert_not_contains "$DOCTOR_OUT" 'check herdr-server=' "an hc verification ran the herdr server check"
+assert_not_contains "$DOCTOR_OUT" 'check launchagent=' "an hc verification ran the Herdr launch-agent checks"
+assert_grep "exec"$'\x1f'"--"$'\x1f'"/usr/bin/security"$'\x1f'"show-keychain-info"$'\x1f'"$CASE_HOME/Library/Keychains/login.keychain-db" \
+  "$CASE_STATE/hcfake/log" "the birth check did not read the login keychain from inside the core"
+assert_no_dangerous_calls "the hc check ran the keychain tool outside the core"
+pass "an hc host with an answering GUI-born core at the version floor is ready"
+
+# A core born over SSH cannot read the login keychain: that is a human gap,
+# and --fix never stops or restarts it.
+printf '36\n' > "$CASE_STATE/hcfake/exec-rc"
+doctor --backend hc
+expect_code 1 "$DOCTOR_RC" "an SSH-born hc core was reported ready"
+assert_contains "$DOCTOR_OUT" 'check hc-core-context=human: the session default core was started outside the GUI login session' \
+  "an exit-36 keychain read was not reported as a wrong-context core"
+assert_contains "$DOCTOR_OUT" 'Firstmate never stops or restarts an answering core' \
+  "the human action did not hand the restart to a person"
+: > "$CASE_STATE/hcfake/log"
+doctor --backend hc --fix
+expect_code 1 "$DOCTOR_RC" "--fix reported an SSH-born hc core ready"
+assert_not_contains "$DOCTOR_OUT" 'fix hc' "--fix attempted an hc repair"
+if grep -E $'\x1f''(stop|start|restart|update)' "$CASE_STATE/hcfake/log" >/dev/null; then
+  fail "--fix changed the core's lifecycle: $(tr '\037' ' ' < "$CASE_STATE/hcfake/log")"
+fi
+printf '1\n' > "$CASE_STATE/hcfake/exec-rc"
+doctor --backend hc
+expect_code 1 "$DOCTOR_RC" "an unproven keychain read was reported ready"
+assert_contains "$DOCTOR_OUT" 'check hc-core-context=human: the session default core could not prove login-keychain access (exit 1' \
+  "another keychain failure was not reported as unproven access"
+pass "a core outside the GUI login session is a human gap that --fix leaves alone"
+
+# No answering core: the doctor reports it and never calls hc, because any hc
+# call against a stopped core starts one in the SSH session.
+stop_hc_core_socket "$HC_DEFAULT_SOCK"
+: > "$CASE_STATE/hcfake/log"
+doctor --backend hc --fix
+expect_code 1 "$DOCTOR_RC" "an hc host with no answering core was reported ready"
+assert_contains "$DOCTOR_OUT" 'check hc-core=human: no hc core answers for session default' \
+  "a silent core was not a human gap"
+assert_contains "$DOCTOR_OUT" 'check hc-core-context=skip:' "the context check ran without a verified core"
+if grep -v $'\x1f''--version' "$CASE_STATE/hcfake/log" | grep -q .; then
+  fail "the doctor contacted a stopped core, which would start it: $(tr '\037' ' ' < "$CASE_STATE/hcfake/log")"
+fi
+pass "a silent hc core is a human gap and the doctor never contacts it"
+
+# The configured session in the remote home selects the core.
+mkdir -p "$CASE_PROJECT_HOME/config"
+printf 'fmlab-x\n' > "$CASE_PROJECT_HOME/config/hc-session"
+start_hc_core_socket "$HC_SOCK_ROOT/herdr-core/fmlab-x/fmlab-x.sock"
+rm -f "$CASE_STATE/hcfake/exec-rc"
+: > "$CASE_STATE/hcfake/log"
+doctor --backend hc
+expect_code 0 "$DOCTOR_RC" "the configured hc session was not verified"$'\n'"$DOCTOR_OUT"
+assert_contains "$DOCTOR_OUT" 'check hc-core=ok: session fmlab-x answers' "the configured session was not the one checked"
+# `--version` is an offline client read; every call that reaches a core must
+# carry the configured session.
+if grep -v $'\x1f''--version$' "$CASE_STATE/hcfake/log" | cut -d $'\x1f' -f1 | grep -v -e '^HC_SESSION=fmlab-x$' | grep -q .; then
+  fail "a core call left the configured session: $(tr '\037' ' ' < "$CASE_STATE/hcfake/log")"
+fi
+printf 'bad/name\n' > "$CASE_PROJECT_HOME/config/hc-session"
+doctor --backend hc
+expect_code 1 "$DOCTOR_RC" "an invalid session setting was accepted"
+assert_contains "$DOCTOR_OUT" 'config/hc-session does not name one valid hc session' "the invalid setting was not named"
+stop_hc_core_socket "$HC_SOCK_ROOT/herdr-core/fmlab-x/fmlab-x.sock"
+pass "the remote home's config/hc-session selects the core the doctor verifies"
+
+# Version floors: an older CLI or an older core is a human gap.
+new_case Darwin no-herdr gui
+install_case_hc
+start_hc_core_socket "$HC_DEFAULT_SOCK"
+mkdir -p "$CASE_STATE/hcfake"
+printf '0.1.14\n' > "$CASE_STATE/hcfake/cli-version"
+doctor --backend hc
+expect_code 1 "$DOCTOR_RC" "an older hc CLI was reported ready"
+assert_contains "$DOCTOR_OUT" 'check hc=human:' "an hc CLI below the floor was not tagged human"
+assert_contains "$DOCTOR_OUT" '0.1.14' "the CLI gap did not name the reported version"
+rm -f "$CASE_STATE/hcfake/cli-version"
+printf '0.1.14\n' > "$CASE_STATE/hcfake/core-version"
+doctor --backend hc
+expect_code 1 "$DOCTOR_RC" "an older hc core was reported ready"
+assert_contains "$DOCTOR_OUT" 'check hc-core=human: the hc core for session default runs 0.1.14, older than the verified minimum' \
+  "an hc core below the floor was not tagged human"
+stop_hc_core_socket "$HC_DEFAULT_SOCK"
+pass "an hc CLI or core below the verified version floor is a human gap"
+
+# Explicit hc on a host without the CLI names it; `any` never resolves to hc.
+new_case Darwin no-herdr gui
+CASE_PLATFORM_OVERRIDE=Linux
+doctor --backend hc
+expect_code 1 "$DOCTOR_RC" "an hc-less host was reported ready for hc"
+assert_contains "$DOCTOR_OUT" 'check hc=human:' "a missing hc CLI was not tagged human"
+assert_contains "$DOCTOR_OUT" 'required hc=MISSING' "the missing hc CLI was not reported"
+install_case_hc
+start_hc_core_socket "$HC_DEFAULT_SOCK"
+doctor
+assert_not_contains "$DOCTOR_OUT" 'check hc=' "a backend-any resolution picked hc"
+assert_not_contains "$DOCTOR_OUT" 'required hc=' "a backend-any resolution required the hc CLI"
+stop_hc_core_socket "$HC_DEFAULT_SOCK"
+pass "an explicit hc request needs the CLI, and backend any never resolves to hc"
+
+# On a Linux account the keychain check does not apply.
+new_case Linux no-herdr
+install_case_hc
+start_hc_core_socket "$HC_DEFAULT_SOCK"
+doctor --backend hc
+expect_code 0 "$DOCTOR_RC" "a Linux hc host was not ready"$'\n'"$DOCTOR_OUT"
+assert_contains "$DOCTOR_OUT" 'check hc-core-context=skip:' "the keychain check ran on Linux"
+if grep -q $'\x1f''exec' "$CASE_STATE/hcfake/log"; then fail "the Linux check ran a keychain probe"; fi
+stop_hc_core_socket "$HC_DEFAULT_SOCK"
+pass "a Linux hc host skips the login-keychain check"
+unset XDG_STATE_HOME
+
+# --- FM_REMOTE_ENTRYPOINT_LINK moves the entrypoint symlink a lab checks -----
+
+new_case Linux with-herdr no-gui
+REMOTE_ROOT="$CASE_DIR/remote-root"
+mkdir -p "$REMOTE_ROOT/bin"
+printf '#!/usr/bin/env bash\n' > "$REMOTE_ROOT/bin/fm-remote-entrypoint.sh"
+export FM_ROOT_OVERRIDE="$REMOTE_ROOT"
+export FM_REMOTE_ENTRYPOINT_LINK="$CASE_DIR/lab-bin/fm-remote-entrypoint.sh"
+mkdir -p "$CASE_HOME/.local/bin"
+ln -s /nonexistent/real-root/bin/fm-remote-entrypoint.sh "$CASE_HOME/.local/bin/fm-remote-entrypoint.sh"
+doctor --fix
+assert_contains "$DOCTOR_OUT" 'check entrypoint-link=ok:' "the overridden entrypoint link was not confirmed"
+[ "$(readlink "$FM_REMOTE_ENTRYPOINT_LINK")" = "$REMOTE_ROOT/bin/fm-remote-entrypoint.sh" ] \
+  || fail "--fix did not create the overridden entrypoint link"
+[ "$(readlink "$CASE_HOME/.local/bin/fm-remote-entrypoint.sh")" = /nonexistent/real-root/bin/fm-remote-entrypoint.sh ] \
+  || fail "--fix with an override touched the account's real entrypoint link"
+unset FM_REMOTE_ENTRYPOINT_LINK
+doctor
+assert_contains "$DOCTOR_OUT" "$CASE_HOME/.local/bin/fm-remote-entrypoint.sh" \
+  "without the override the doctor did not check the account's own entrypoint link"
+unset FM_ROOT_OVERRIDE
+pass "FM_REMOTE_ENTRYPOINT_LINK moves the checked entrypoint link and the default stays ~/.local/bin"

@@ -206,7 +206,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
           fi
           remote_backend=$(printf '%s\n' "$route_out" | sed -n 's/^backend=//p' | tail -1)
           case "$remote_backend" in
-            herdr | rex) ;;
+            herdr | rex | hc) ;;
             *)
               FM_SM_LIVE_REASON="alive remote endpoint is recorded on backend '${remote_backend:-missing}'; migrate or retire it explicitly"
               return 0
@@ -294,9 +294,10 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
 # Acts on a `relaunchable` probe verdict for <id>: takes the per-home relaunch
 # lock, records the attempt, kills a confirmed-dead local endpoint if required
 # (FM_SM_LIVE_KILL), runs the guarded spawn, then records its outcome.
-# An explicit [backend] is a deliberate move (bin/fm-secondmate-move.sh, which
-# refuses a remote mate before calling this): the respawn is passed
-# `--backend <backend>` in place of the recorded backend. A move never resumes
+# An explicit [backend] is a deliberate move (bin/fm-secondmate-move.sh): the
+# respawn is passed `--backend <backend>` in place of the recorded backend,
+# for a local mate and for a remote one whose host already released its old
+# endpoint. A move never resumes
 # in place: a T3 resume becomes a kill that must prove the thread archived
 # before the respawn on the target. Without it a local mate is respawned on
 # its recorded backend.
@@ -387,9 +388,14 @@ fm_secondmate_liveness_relaunch() {  # <meta> <id> [timeout-secs] [backend]
   # config/backend applies to new spawns, and recovery keeps a local mate on
   # its recorded backend. bin/fm-secondmate-move.sh is the explicit way to move
   # a mate, and its named backend overrides the recorded one here.
-  # A remote mate's backend is its host's, so it is never pinned from here.
+  # A remote mate's backend is its host's, so recovery never pins it from
+  # here; only a move names one.
   local -a respawn_args=("$id" --secondmate)
-  [ -n "$(fm_meta_get "$meta" remote_host)" ] || respawn_args+=(--backend "${move_backend:-$(fm_backend_of_meta "$meta")}")
+  if [ -n "$move_backend" ]; then
+    respawn_args+=(--backend "$move_backend")
+  elif [ -z "$(fm_meta_get "$meta" remote_host)" ]; then
+    respawn_args+=(--backend "$(fm_backend_of_meta "$meta")")
+  fi
   if [ -n "$timeout" ]; then
     FM_SM_LIVE_OUT=$(FM_SPAWN_NO_GUARD=1 fm_run_timed "$timeout" "$FM_ROOT/bin/fm-spawn.sh" "${respawn_args[@]}" 2>&1) || rc=$?
   else

@@ -177,10 +177,11 @@ The worktree and the task's records are unaffected either way.
 - Targeting is exact.
   Only a bare task id with a `state/<id>.meta` record in this home is accepted, and that record must pass the shared endpoint-identity validation.
   A legacy `fm-<id>` window label, an explicit `session:window` endpoint, and a record whose `endpoint_task_id` names another task are all refused.
-- A remotely placed secondmate is refused by name.
+- A remotely placed secondmate is refused by name unless it runs on hc.
   Its agent runs on another host, so none of the postconditions this plane verifies could be read for it here; local endpoint validation would refuse the record regardless, because `window=remote:<id>` can never match a local backend's required shape.
   Drive that lifecycle on its own host and reconcile it through the secondmate recovery path.
-  For `relaunch`, drive the host through [`bin/fm-remote-secondmate-relaunch.sh`](../bin/fm-remote-secondmate-relaunch.sh), which runs `bin/fm-on.sh <id> fm-remote-secondmate-control.sh relaunch ...` and then republishes this home's route record from the identity the host confirmed; the host-local leg runs this same plane against a record that is ordinary and local there, so every checkpoint, journal, rollback, and postcondition below applies unchanged ([`docs/remote-secondmates.md`](remote-secondmates.md)); `interrupt` and `exit` have no such route.
+  For `relaunch`, drive the host through [`bin/fm-remote-secondmate-relaunch.sh`](../bin/fm-remote-secondmate-relaunch.sh), which runs `bin/fm-on.sh <id> fm-remote-secondmate-control.sh relaunch ...` and then republishes this home's route record from the identity the host confirmed; the host-local leg runs this same plane against a record that is ordinary and local there, so every checkpoint, journal, rollback, and postcondition below applies unchanged ([`docs/remote-secondmates.md`](remote-secondmates.md)).
+  A remote secondmate on hc is routed instead of refused: `interrupt` and `exit` run the host's `fm-remote-secondmate-control.sh control <id> <verb>`, which runs this plane there, and `relaunch` runs that relaunch wrapper with the axes the command line leaves out taken from the route record.
 - An unverified harness is refused rather than guessed at.
 - An implicit relaunch from a prefixed raw-command basename is refused before the agent or durable state is touched because its original launch command cannot be reconstructed.
 - An adapter that is not verified for this task's kind is refused **before** the running agent is stopped, not after.
@@ -199,7 +200,7 @@ The worktree and the task's records are unaffected either way.
 - `fm-spawn --relaunch` independently refuses unless the endpoint is positively agent-free - either a `dead` endpoint that survives, or a Herdr or Rex endpoint proven gone by the absence proof above - so a replacement can never join a live agent.
   An `alive`, `ambiguous`, or `unreadable` verdict all refuse (a Rex `unreadable` after the absence proof cannot settle it), and so does any endpoint whose absence is not provable, which on tmux is every `missing`; absence is claimed only from positive evidence of it.
   hc permits adoption of a surviving task-owned terminal, but refuses missing or finished terminals because its record does not identify the core/socket that could prove their absence.
-  It also refuses secondmate control; see [the hc guide](hc-backend.md#limits).
+  A secondmate on hc gets the same control as a ship or scout, launched in its home rather than a task worktree.
   For a ship or scout it also refuses, by name, a recorded worktree that is the home, the code root, or a repository's primary checkout (its git dir equals its git common dir), so a worker only ever comes back in its own task worktree.
   This check lives only in the launch owner, so on the `relaunch` verb it fires after the old agent has stopped and the transaction ends as a failed launch.
   It also requires the shell to be in the recorded worktree: every backend but Orca (which owns its own task worktree with no current-path probe) gets one explicit `cd` to the recorded path (Herdr, whose shell may not be ready for it, gets one resend if the path has not moved after about 10 seconds), then a pre-launch path read that refuses before any harness starts unless it confirms the endpoint is sitting in the recorded copy.

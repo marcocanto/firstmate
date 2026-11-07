@@ -133,7 +133,9 @@
 # worse than a loud refusal.
 #
 # A remotely placed secondmate is refused by name: its agent runs on another
-# host, so no postcondition this plane verifies could be read for it here.
+# host, so no postcondition this plane verifies could be read for it here. A
+# remote hc mate's verbs instead cross to its host, which runs this same plane
+# against its own endpoint record (the remote-placement block below).
 #
 # Fail-closed boundaries:
 #   - An unverified harness, or a harness whose control mechanics are unknown,
@@ -394,8 +396,40 @@ fi
 # cannot say is WHY, and "malformed metadata" is the wrong thing to tell an
 # operator about a correctly configured remote route. Name the placement
 # instead, using the same `remote_host` signal bin/fm-send.sh routes on.
-if [ -n "$(fm_meta_get "$META" remote_host)" ]; then
-  die "task $ID is a remotely placed secondmate on $(fm_meta_get "$META" remote_host); its agent runs outside this home, so no lifecycle action here could verify that it interrupted, stopped, or came back. Drive its lifecycle on that host, and reconcile it through the secondmate recovery path rather than this plane"
+#
+# A remote hc mate is the exception: its verbs cross to that host, where this
+# same plane runs against the host's own endpoint record and proves its own
+# postconditions (bin/fm-remote-secondmate-control.sh `control` and
+# `relaunch`). relaunch goes through bin/fm-remote-secondmate-relaunch.sh so
+# this home's route record follows the identity the host confirms; an axis
+# not given keeps the one that record names, as launch and recovery do.
+REMOTE_HOST=$(fm_meta_get "$META" remote_host)
+if [ -n "$REMOTE_HOST" ]; then
+  if [ "$(fm_meta_get "$META" remote_backend)" != hc ]; then
+    die "task $ID is a remotely placed secondmate on $REMOTE_HOST; its agent runs outside this home, so no lifecycle action here could verify that it interrupted, stopped, or came back. Drive its lifecycle on that host, and reconcile it through the secondmate recovery path rather than this plane"
+  fi
+  case "$VERB" in
+    interrupt | exit)
+      remote_rc=0
+      "$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-secondmate-control.sh control "$ID" "$VERB" </dev/null || remote_rc=$?
+      [ "$remote_rc" -ne 255 ] || echo "error: remote secondmate $ID on $REMOTE_HOST was unreachable or its $VERB completion is unknown; reconcile on that host before retrying" >&2
+      exit "$remote_rc"
+      ;;
+    relaunch)
+      [ "$ACCOUNT_SET" = 0 ] || die "--account applies to a local worker's account pin; a remote secondmate's account lives in its home on $REMOTE_HOST"
+      remote_harness=$NEW_HARNESS
+      [ "$HARNESS_SET" = 1 ] || remote_harness=$(fm_meta_get "$META" harness)
+      [ -n "$remote_harness" ] || die "remote secondmate $ID's route record names no harness; pass --harness to choose its runtime deliberately"
+      remote_model=$NEW_MODEL
+      [ "$MODEL_SET" = 1 ] || remote_model=$(fm_meta_get "$META" model)
+      remote_effort=$NEW_EFFORT
+      [ "$EFFORT_SET" = 1 ] || remote_effort=$(fm_meta_get "$META" effort)
+      remote_rc=0
+      "$SCRIPT_DIR/fm-remote-secondmate-relaunch.sh" "$ID" "$remote_harness" \
+        "${remote_model:-default}" "${remote_effort:-default}" </dev/null || remote_rc=$?
+      exit "$remote_rc"
+      ;;
+  esac
 fi
 
 fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
@@ -406,8 +440,6 @@ RECORDED_HARNESS=$(fm_meta_get "$META" harness)
 KIND=$(fm_meta_get "$META" kind)
 WT=$(fm_meta_get "$META" worktree)
 [ -n "$KIND" ] || KIND=ship
-[ "$BACKEND" != hc ] || [ "$KIND" != secondmate ] \
-  || die "the hc backend does not support secondmate lifecycle control"
 # OpenCode's composer exit key changed between its 1.x and 2.x lines; the major
 # spawn detected is recorded here so the exit command below matches the running
 # agent. Absent (a legacy record or a non-opencode task) it stays empty.

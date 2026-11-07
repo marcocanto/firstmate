@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# fm-secondmate-move.sh - move a LOCAL persistent second mate onto another
-# runtime backend, keeping its home, records, and backlog exactly as they are.
+# fm-secondmate-move.sh - move a persistent second mate onto another runtime
+# backend, keeping its home, records, and backlog exactly as they are.
 #
 # Usage: fm-secondmate-move.sh <secondmate-id> --backend <name>
 #
@@ -27,9 +27,20 @@
 #      the attempt and its outcome in the ordinary relaunch ledger.
 # An ambiguous, unreadable, or unverified endpoint refuses before anything is
 # stopped. A mate recorded with no endpoint at all is simply launched on the
-# target backend. A remote mate is refused before its host is contacted or
-# anything is stopped: its backend belongs to its host
-# (docs/remote-secondmates.md).
+# target backend.
+#
+# A remote mate (a record with remote_host=) moves on its own host, and only
+# onto that host's hc core (docs/remote-secondmates.md "Move a remote second
+# mate onto hc"). Before anything is stopped it refuses any other target, a
+# move onto the backend already recorded, and a host the hc readiness gate
+# (bin/fm-remote-readiness-lib.sh with --backend hc) reports unready or
+# cannot reach. Under the same locks it then stops an alive agent with the
+# host's own `control <id> exit`, has the host close the agent-free endpoint
+# and set its record aside (`move-release`), and respawns the mate through
+# fm_secondmate_liveness_relaunch with hc named. A failed launch has the host
+# restore its set-aside record (`move-settle restore`) and leaves this home's
+# record as it was, so the next liveness recovery respawns the mate on its
+# previous backend; a completed one drops the set-aside record.
 #
 # The target must be a spawn-capable backend that hosts second mates
 # (bin/fm-backend.sh's FM_BACKEND_SECONDMATE) and must be ready to launch one:
@@ -43,7 +54,8 @@
 # recorded backend; a different record found in place by then is left alone.
 # The failure says which of those happened.
 #
-# Prints `moved <id> from=<old-backend> to=<new-backend>` followed by the
+# Prints `moved <id> from=<old-backend> to=<new-backend>` (plus `host=<alias>`
+# for a remote move) followed by the
 # spawn's own `spawned ...` line. Exit status: 0 moved; 1 refused or failed,
 # with the message naming the state the mate was left in; 2 invalid use.
 set -u
@@ -60,6 +72,113 @@ usage() {
 die() {  # <message>
   echo "error: $1" >&2
   exit 1
+}
+
+first_line() {  # <text>
+  local line
+  line=$(printf '%s\n' "$1" | sed -n '/^error: /{p;q;}')
+  [ -n "$line" ] || line=$1
+  printf '%s\n' "$line" | sed -n '/./{s/^error: //;s/[[:space:]]\{1,\}/ /g;p;q;}'
+}
+
+CONTROL_LOCK=
+CONTROL_LOCK_HELD=0
+LIVENESS_LOCK_HELD=0
+SNAPSHOT=
+# shellcheck disable=SC2329 # Registered by the EXIT trap in move_lock.
+move_cleanup() {
+  [ -z "$SNAPSHOT" ] || rm -f "$SNAPSHOT"
+  [ "$LIVENESS_LOCK_HELD" != 1 ] || fm_secondmate_liveness_unlock "$ID"
+  [ "$CONTROL_LOCK_HELD" != 1 ] || fm_lock_release "$CONTROL_LOCK" 2>/dev/null || true
+}
+
+# A relaunch (bin/fm-control.sh) takes the task's control lock rather than the
+# liveness lock, so the move holds that lock too, across the probe, the stop,
+# the close, and the launch: no relaunch can start an agent in an endpoint this
+# move read as dead. The stop below runs as this process's child, and fm-control
+# accepts the lock from its parent the way fm-spawn --relaunch does; a fresh
+# --secondmate spawn never takes it.
+move_lock() {
+  fm_sm_live_require_locks || die "the lock helpers could not be loaded; nothing was stopped or moved"
+  CONTROL_LOCK="$STATE/.control-$ID.lock"
+  fm_lock_try_acquire "$CONTROL_LOCK" \
+    || die "another lifecycle action is already running for second mate $ID; retry once it finishes"
+  CONTROL_LOCK_HELD=1
+  trap move_cleanup EXIT
+  fm_secondmate_liveness_lock "$ID" \
+    || die "another liveness check or recovery is in progress for second mate $ID; retry once it finishes"
+  LIVENESS_LOCK_HELD=1
+}
+
+# remote_host_call <verb> <args...>: one host control verb through fm-on.
+# Prints its combined output; returns its status, 255 for unknown completion.
+remote_host_call() {
+  "$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-secondmate-control.sh "$@" </dev/null 2>&1
+}
+
+# The remote path (header): a remote mate moves only on its own host, from its
+# recorded backend onto that host's hc core. Every refusal before the stop
+# leaves the mate running and both records unchanged.
+remote_move() {
+  local old harness rc=0 out stopped=0
+  [ "$TARGET" = hc ] \
+    || die "a remote second mate moves only onto its host's hc core, not backend=$TARGET; nothing was stopped or moved"
+  old=$(fm_meta_get "$META" remote_backend)
+  [ -n "$old" ] || old=herdr
+  [ "$old" != "$TARGET" ] \
+    || die "second mate $ID is already recorded on backend=$TARGET on $REMOTE_HOST; to restart it in place use bin/fm-control.sh $ID relaunch"
+  harness=$(fm_meta_get "$META" harness)
+  [ -n "$harness" ] || die "remote second mate $ID's route record names no harness; nothing was stopped or moved"
+  fm_remote_readiness_ensure "$SCRIPT_DIR" "$ID" "$TARGET" "$harness" || rc=$?
+  [ "$rc" -ne 255 ] \
+    || die "remote host $REMOTE_HOST is unreachable or its readiness is unknown; nothing was stopped or moved"
+  [ "$rc" -eq 0 ] \
+    || die "remote host $REMOTE_HOST is not ready for backend=$TARGET ($(printf '%s\n' "$FM_REMOTE_READINESS_OUT" | awk '/^check [^=]+=(fixable|human):|^error:/ { print; exit }')); nothing was stopped or moved"
+  move_lock
+  fm_secondmate_liveness_probe "$META" "$ID" poll
+  case "$FM_SM_LIVE_STATUS" in
+    silent) ;;
+    alive)
+      rc=0
+      out=$(remote_host_call control "$ID" exit) || rc=$?
+      [ "$rc" -ne 255 ] \
+        || die "the stop of second mate $ID's $old agent on $REMOTE_HOST has unknown completion; nothing was moved and its record is unchanged"
+      [ "$rc" -eq 0 ] \
+        || die "second mate $ID's agent on $old could not be proven stopped, so nothing was moved and its record is unchanged: $(first_line "$out")"
+      stopped=1
+      fm_secondmate_liveness_probe "$META" "$ID" poll
+      [ "$FM_SM_LIVE_STATUS" = relaunchable ] \
+        || die "after the stop, second mate $ID's endpoint reads '$FM_SM_LIVE_STATE' rather than agent-free, so the move stops here with its record unchanged and no replacement launched"
+      ;;
+    relaunchable) ;;
+    *) die "second mate $ID's endpoint cannot be classified ($FM_SM_LIVE_REASON); nothing was stopped or moved" ;;
+  esac
+  if [ "$FM_SM_LIVE_STATUS" != silent ]; then
+    rc=0
+    out=$(remote_host_call move-release "$ID" "$old") || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      [ "$stopped" = 1 ] || die "second mate $ID's $old endpoint on $REMOTE_HOST was not released ($(first_line "$out")); nothing was stopped or moved"
+      die "second mate $ID's $old agent was stopped, but its endpoint on $REMOTE_HOST was not released ($(first_line "$out")); both records are unchanged, so the next liveness recovery respawns it on $old"
+    fi
+  fi
+  SNAPSHOT="$STATE/.$ID.meta.move.$$"
+  cp -p "$META" "$SNAPSHOT" || die "could not snapshot second mate $ID's record before the launch; restore its host record with 'fm-on.sh $ID fm-remote-secondmate-control.sh move-settle $ID restore'"
+  if fm_secondmate_liveness_relaunch "$META" "$ID" "" "$TARGET"; then
+    remote_host_call move-settle "$ID" drop >/dev/null \
+      || echo "warning: second mate $ID moved, but its host kept the set-aside $old record; drop it with 'fm-on.sh $ID fm-remote-secondmate-control.sh move-settle $ID drop'" >&2
+    printf 'moved %s from=%s to=%s host=%s\n' "$ID" "$old" "$TARGET" "$REMOTE_HOST"
+    printf '%s\n' "$FM_SM_LIVE_OUT" | grep '^spawned ' || true
+    exit 0
+  fi
+  rc=0
+  out=$(remote_host_call move-settle "$ID" restore) || rc=$?
+  [ "$rc" -eq 0 ] || echo "warning: the host could not restore second mate $ID's $old endpoint record: $(first_line "$out")" >&2
+  if ! cmp -s "$SNAPSHOT" "$META"; then
+    die "second mate $ID could not be launched on $TARGET, and a different parent record is now in place (published by the launch before a later step failed, or by another writer); that record was left as it is: $(first_line "$FM_SM_LIVE_OUT")"
+  fi
+  [ "$FM_SM_LIVE_STATUS" != skipped ] || [ "$stopped" = 1 ] \
+    || die "second mate $ID was not moved to $TARGET; its old endpoint was already agent-free and its records are unchanged: $FM_SM_LIVE_REASON"
+  die "second mate $ID could not be launched on $TARGET on $REMOTE_HOST; its previous record (backend=$old) is in place, so the next liveness recovery respawns it on $old: $(first_line "$FM_SM_LIVE_OUT")"
 }
 
 ID=
@@ -95,8 +214,7 @@ META="$STATE/$ID.meta"
 [ -f "$META" ] && [ ! -L "$META" ] || die "no task record for $ID in $STATE; a move needs the mate's own record"
 [ "$(fm_meta_get "$META" kind)" = secondmate ] || die "task $ID is not a second mate; fm-secondmate-move moves kind=secondmate records only"
 REMOTE_HOST=$(fm_meta_get "$META" remote_host)
-[ -z "$REMOTE_HOST" ] \
-  || die "second mate $ID is placed on remote host $REMOTE_HOST, whose backend is its own; a local move is refused; nothing was stopped or moved"
+[ -z "$REMOTE_HOST" ] || remote_move
 
 OLD_BACKEND=$(fm_backend_of_meta "$META")
 [ "$OLD_BACKEND" != "$TARGET" ] || die "second mate $ID is already recorded on backend=$TARGET; to restart it in place use bin/fm-control.sh $ID relaunch"
@@ -129,36 +247,7 @@ case "$TARGET" in
   rex) fm_backend_rex_local_server_ensure || die "backend=rex is not ready to launch second mate $ID; nothing was stopped or moved" ;;
 esac
 
-first_line() {  # <text>
-  local line
-  line=$(printf '%s\n' "$1" | sed -n '/^error: /{p;q;}')
-  [ -n "$line" ] || line=$1
-  printf '%s\n' "$line" | sed -n '/./{s/^error: //;s/[[:space:]]\{1,\}/ /g;p;q;}'
-}
-
-# A relaunch (bin/fm-control.sh) takes the task's control lock rather than the
-# liveness lock, so the move holds that lock too, across the probe, the stop,
-# the close, and the launch: no relaunch can start an agent in an endpoint this
-# move read as dead. The stop below runs as this process's child, and fm-control
-# accepts the lock from its parent the way fm-spawn --relaunch does; a fresh
-# --secondmate spawn never takes it.
-fm_sm_live_require_locks || die "the lock helpers could not be loaded; nothing was stopped or moved"
-CONTROL_LOCK="$STATE/.control-$ID.lock"
-fm_lock_try_acquire "$CONTROL_LOCK" \
-  || die "another lifecycle action is already running for second mate $ID; retry once it finishes"
-CONTROL_LOCK_HELD=1
-LIVENESS_LOCK_HELD=0
-SNAPSHOT=
-# shellcheck disable=SC2329 # Registered by the EXIT trap below.
-move_cleanup() {
-  [ -z "$SNAPSHOT" ] || rm -f "$SNAPSHOT"
-  [ "$LIVENESS_LOCK_HELD" != 1 ] || fm_secondmate_liveness_unlock "$ID"
-  [ "$CONTROL_LOCK_HELD" != 1 ] || fm_lock_release "$CONTROL_LOCK" 2>/dev/null || true
-}
-trap move_cleanup EXIT
-fm_secondmate_liveness_lock "$ID" \
-  || die "another liveness check or recovery is in progress for second mate $ID; retry once it finishes"
-LIVENESS_LOCK_HELD=1
+move_lock
 
 STOPPED=0
 fm_secondmate_liveness_probe "$META" "$ID" poll
