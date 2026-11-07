@@ -616,11 +616,8 @@ remote_convert() {
   else
     : > "$CV_STAGE/status.prefix" || cv_fail "cannot stage an empty status stream"
   fi
-  cp "$CV_STAGE/status.prefix" "$CV_STAGE/relay.next" || cv_fail "cannot stage the relay log"
-  [ ! -f "$home/state/parent-replies.status" ] || cat "$home/state/parent-replies.status" >> "$CV_STAGE/relay.next" \
-    || cv_fail "cannot stage the relay log"
   CV_STATUS_DONE=1
-  { cp "$CV_STAGE/relay.next" "$home/state/parent-replies.status.convert.$$" \
+  { cp "$CV_STAGE/status.prefix" "$home/state/parent-replies.status.convert.$$" \
     && mv -f "$home/state/parent-replies.status.convert.$$" "$home/state/parent-replies.status"; } \
     || cv_fail "second mate $ID's relay log could not be written"
 
