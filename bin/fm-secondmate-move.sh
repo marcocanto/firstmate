@@ -40,7 +40,9 @@
 # fm_secondmate_liveness_relaunch with hc named. A failed launch has the host
 # restore its set-aside record (`move-settle restore`) and leaves this home's
 # record as it was, so the next liveness recovery respawns the mate on its
-# previous backend; a completed one drops the set-aside record.
+# previous backend; a completed one drops the set-aside record. A launch
+# whose completion is unknown (exit 255) may still be running on the host, so
+# the set-aside record is kept for the operator to settle there.
 #
 # The target must be a spawn-capable backend that hosts second mates
 # (bin/fm-backend.sh's FM_BACKEND_SECONDMATE) and must be ready to launch one:
@@ -170,6 +172,8 @@ remote_move() {
     printf '%s\n' "$FM_SM_LIVE_OUT" | grep '^spawned ' || true
     exit 0
   fi
+  [ "$FM_SM_LIVE_RC" -ne 255 ] \
+    || die "the launch of second mate $ID on $TARGET on $REMOTE_HOST has unknown completion, so its host keeps the set-aside $old record; check that host for a $TARGET mate, then settle it with 'fm-on.sh $ID fm-remote-secondmate-control.sh move-settle $ID drop' if one runs or 'move-settle $ID restore' if none does: $(first_line "$FM_SM_LIVE_OUT")"
   rc=0
   out=$(remote_host_call move-settle "$ID" restore) || rc=$?
   [ "$rc" -eq 0 ] || echo "warning: the host could not restore second mate $ID's $old endpoint record: $(first_line "$out")" >&2

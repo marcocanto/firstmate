@@ -83,7 +83,7 @@ fm_backend_hc_session() {
 # remote job worker runs every host command under `env -i`, so no HC_SESSION
 # reaches it; the home's own config/hc-session carries the choice instead, and
 # an absent file means the account's `default` core, the one Herdr.app binds.
-# Prints the session, or fails on a file whose content is not one valid name.
+# Prints the session, or fails on a file whose first line is not one valid name.
 fm_backend_hc_remote_session() {  # <home>
   local file=$1/config/hc-session session
   if [ ! -e "$file" ] && [ ! -L "$file" ]; then
@@ -91,7 +91,7 @@ fm_backend_hc_remote_session() {  # <home>
     return 0
   fi
   [ -f "$file" ] && [ ! -L "$file" ] || return 1
-  session=$(tr -d '[:space:]' < "$file" 2>/dev/null) || return 1
+  session=$(head -n 1 "$file" 2>/dev/null | tr -d '[:space:]') || return 1
   fm_backend_hc_atom_valid "$session" || return 1
   printf '%s' "$session"
 }

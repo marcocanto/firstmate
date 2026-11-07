@@ -417,6 +417,7 @@ if [ -n "$REMOTE_HOST" ]; then
       ;;
     relaunch)
       [ "$ACCOUNT_SET" = 0 ] || die "--account applies to a local worker's account pin; a remote secondmate's account lives in its home on $REMOTE_HOST"
+      [ "$NOTE_SET" = 0 ] || die "--note applies to a local relaunch's progress note; a remote secondmate relaunch on $REMOTE_HOST carries no note"
       remote_harness=$NEW_HARNESS
       [ "$HARNESS_SET" = 1 ] || remote_harness=$(fm_meta_get "$META" harness)
       [ -n "$remote_harness" ] || die "remote secondmate $ID's route record names no harness; pass --harness to choose its runtime deliberately"

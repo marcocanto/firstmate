@@ -764,7 +764,7 @@ Later recovery and restart reuse that republished record, so one relaunch is eno
 
 For a remote mate on hc, `bin/fm-control.sh <id> interrupt|exit|relaunch` on the primary drives that mate on its host.
 `interrupt` and `exit` run the host's `fm-remote-secondmate-control.sh control <id> <verb>`, which runs the ordinary control plane against the host's endpoint record and its proven postconditions.
-`relaunch` runs `bin/fm-remote-secondmate-relaunch.sh`, with each axis not given on the command line taken from the primary's route record; `--account` is refused because the mate's account pin lives in its remote home.
+`relaunch` runs `bin/fm-remote-secondmate-relaunch.sh`, with each axis not given on the command line taken from the primary's route record; `--account` is refused because the mate's account pin lives in its remote home, and `--note` because a remote relaunch records no progress note.
 A remote mate on Herdr or Rex is still refused by `bin/fm-control.sh`, because nothing on the primary could verify its lifecycle.
 
 ### Move a remote second mate onto hc
@@ -783,6 +783,7 @@ The host's `move-release` verb closes that endpoint and sets its record aside, a
 A host that holds no endpoint record for the mate has nothing to close, so the release succeeds and sets nothing aside.
 On success, `move-settle drop` discards the set-aside record and the move prints `moved <id> from=<backend> to=hc host=<host>`.
 If the launch fails, `move-settle restore` puts the host's previous record back and the primary keeps its previous route record, so the next liveness recovery respawns the mate on its old backend.
+If the launch's completion is unknown (SSH exit 255), the move keeps the set-aside record, because the launch may still be running on the host, and names the `move-settle drop` or `move-settle restore` step to run once the host shows whether an hc mate came up.
 The [`bin/fm-secondmate-move.sh`](../bin/fm-secondmate-move.sh) header owns the sequence, and [`bin/fm-remote-secondmate-control.sh`](../bin/fm-remote-secondmate-control.sh) owns the host verbs.
 
 ### Firstmate code convergence

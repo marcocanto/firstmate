@@ -595,7 +595,7 @@ A remote second mate can run on hc on its host; [Remote second mates](remote-sec
 
 ### Remote hc core (config/hc-session)
 
-The remote home of a remote second mate on hc may hold `config/hc-session`, whose first line names the hc core session its host launches and reads it on.
+The remote home of a remote second mate on hc may hold `config/hc-session`, whose first line names the hc core session its host launches and reads it on; any later lines are ignored.
 Absent, the host uses `default`, the core Herdr.app starts in the account's GUI login session.
 The host reads this file rather than `HC_SESSION`, because the remote job worker runs every command with an empty environment.
 A name outside letters, digits, dot, dash, and underscore is refused by the launch and reported by `bin/fm-remote-doctor.sh --backend hc`.
