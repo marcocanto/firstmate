@@ -4001,6 +4001,30 @@ Second mate homes were seeded with `bin/fm-home-seed.sh <id> <path> --no-project
 A process inside a lab core's terminal cannot discover the lab's pinned socket, because the adapter resolves the core from `HC_SESSION` and hc's default socket layout.
 The mate's first crew spawn without a pin failed with `error: 'hc server status' failed for session '<lab session>'`, so the crew spawn and the primary's launch named `FM_HC_SOCKET`.
 
+### Remote hc second mates
+
+Measured on 2026-11-07 across two Macs on macOS with `hc 0.1.18` and `omp/18.18.0`, every agent a real omp session.
+The primary was a `bin/fm-lab-home.sh` home on one Mac, checked out from this branch.
+The remote account on the other Mac already ran a live fleet, so the lab never used that account's real code root, homes, remote job worker, entrypoint link, hc core `default`, or Herdr sessions.
+The lab code root was a clone of this branch inside a lab directory, and two lab-labelled `gui/<uid>` launch agents started a lab hc core (`fm-hclab-*`, launched with `hc server start`) and a lab remote job worker.
+The worker ran in the Linux job-worker shape (`FM_REMOTE_JOB_PLATFORM_OVERRIDE=Linux`) with its own `FM_REMOTE_JOB_STATE_ROOT`, and the primary's `FM_SSH_BIN` wrapper ran the lab root's entrypoint with those knobs and `FM_REMOTE_ENTRYPOINT_LINK` pointing at a lab-owned link.
+The mate home was seeded with `bin/fm-remote-home-seed.sh <id> <alias> <lab-root> <lab-home> --backend hc --no-projects`, and its `config/hc-session` named the lab core.
+
+| Scenario | Commands | Result |
+| --- | --- | --- |
+| Launch | `bin/fm-spawn.sh <id> --secondmate --backend hc --harness omp` from the primary | The parent record carried `remote_backend=hc`, `remote_hc_session=<lab core>`, and `remote_target=<lab core>:t1`; the host record carried `backend=hc` and `hc_session=`. The terminal had `parent: null`, `herdr.space=fm-2ndmate-<id>-<hash>`, and the host code root's `firstmate.*` labels, and its foreground was omp started with `--config <root>/.omp/fm-worker-overlay.yml`. `state` read `alive`, and the mate ran its own session start. |
+| Readiness | `fm-remote-doctor.sh --backend hc --harness omp` through `bin/fm-on.sh`, against the launch-agent core and against a second lab core started with `hc server start` from an SSH shell | The launch-agent core passed `check hc-core=ok` and `check hc-core-context=ok`. The SSH-born core failed with `check hc-core-context=human: ... (login keychain read exit 36)`, and `--fix` printed the same gap with no `fix` line; that core kept the same pid and uptime and was stopped by the lab teardown afterwards. |
+| Steering | `bin/fm-send.sh <id> <text>` | The record landed in the host's `state/parent-route/<id>.inbox/`, the doorbell submitted in the mate's terminal, and the mate moved the record to `handled/` and appended its answer to the parent channel. |
+| Recovery | `bin/fm-bootstrap.sh` with the mate alive, then after `kill` of the omp pid that `hc get` reported, then once more | The alive sweep left the mate's terminal and record unchanged. After the kill `state` read `dead`; the next sweep closed that terminal and respawned the mate at a new address with the same labels, and the parent record named the new target. |
+| Lifecycle | `bin/fm-control.sh <id> exit`, a repeated `exit`, `relaunch`, and `interrupt` from the primary | `exit` printed `stopped`, the omp process was gone, and `state` read `dead`; the repeated `exit` printed `already-stopped`. `relaunch` started a new omp process in the same terminal address with `--config` on its command line and republished the parent record. `interrupt` printed `interrupt-delivered ... verified=agent-alive`. |
+| Crew | The mate, steered from the primary, spawned a scout with `bin/fm-spawn.sh <task> --backend hc` and tore it down after it reported | The scout's terminal was a child of the mate's terminal in the lab core, in the mate's space, with the mate home's `firstmate.*` labels; it reported the lab session in its own `HC_SESSION`, and its teardown removed the terminal. |
+| Move | `bin/fm-secondmate-move.sh <id> --backend hc` and `--backend herdr` on the hc mate; then, with the mate stopped, its hc endpoint released on the host, and its parent record rewritten to a Herdr route in `fm-remote`, the same move with a host that does not answer, with `config/hc-session` naming a core that does not answer, and with the lab core | The hc and herdr targets refused without contacting the host. The unanswering host refused with `unreachable or its readiness is unknown`, and the silent core refused with `not ready for backend=hc (check hc-core=human: no hc core answers ...)`; each left the parent record byte-identical, and no core was started for the silent session. The last run printed `moved <id> from=herdr to=hc host=<alias>`, launched the mate in a new terminal of the lab core with its labels and `--config`, and left no set-aside record on the host. |
+
+The lab mate stayed in the lab core, so it never had a real Herdr endpoint in the host's `fm-remote` session.
+The move from a live Herdr mate therefore stayed unproved on a real host: the `control <id> exit` of a Herdr agent and the `move-release` close of its pane ran only in the portable tests.
+The lab worker ran in the Linux shape from a launch agent, so the Aqua launch-agent contract of `dev.firstmate.remote-job` and the account's real `~/.local/bin/fm-remote-entrypoint.sh` link were not exercised; both stayed unchanged.
+Before the remote home existed, the seed's readiness gate and one doctor run read the account's `default` core (`server status`, the hello handshake, and one `hc exec` of `security show-keychain-info`), because an absent `config/hc-session` selects `default`; neither created a terminal there.
+
 ### Not verified
 
 - That Firstmate processes inside a terminal of the Herdr app's own core reach that core without `FM_HC_SOCKET`; the lab above could not exercise it.
