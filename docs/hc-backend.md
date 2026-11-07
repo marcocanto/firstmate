@@ -146,7 +146,10 @@ Its terminal's `firstmate.home` label is the host code root's tag, because the h
   `bin/fm-spawn.sh` pastes and submits the spawn launch line with `hc send` and consumes the Enter that follows it.
 - Submitting a message uses one bounded `hc send --wait`.
   A started turn or a still-working wait confirms it natively; otherwise the adapter falls back to the composer screen, with Enter retries only for a proven pending composer.
-  A blocked terminal (exit 9) returns `unknown` without typing or retrying and is never forced.
+  hc refuses `hc send` (exit 9) to a terminal whose status is `blocked`, and `bin/fm-osc7501.sh` publishes a worker's open `needs-decision` or `blocked` status line as exactly that status.
+  The adapter repeats a refused send with `--force` only when the blocked record is Firstmate's own (`app=firstmate-*`) and one screen read proves an empty composer with no recognized dialog.
+  Any other blocked terminal, including one whose program reported the block itself, returns `unknown` without typing or retrying.
+  `hc keys` is never refused, so Enter retries and interrupts need no force.
 - hc reports one foreground process per terminal.
   When that process is a launcher, the adapter also reads the rest of its process group from `ps`, which works only for terminals on the local machine.
 - Right after a terminal starts, `hc get` can report no foreground process yet, and agent state reads `unreadable` until the shell is up.
