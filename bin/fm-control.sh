@@ -402,7 +402,9 @@ fi
 # postconditions (bin/fm-remote-secondmate-control.sh `control` and
 # `relaunch`). relaunch goes through bin/fm-remote-secondmate-relaunch.sh so
 # this home's route record follows the identity the host confirms; an axis
-# not given keeps the one that record names, as launch and recovery do.
+# not given keeps the one that record names, as launch and recovery do, unless
+# the harness changes, where a model or effort chosen for the old harness does
+# not transfer and resets to default, as the local relaunch below does.
 REMOTE_HOST=$(fm_meta_get "$META" remote_host)
 if [ -n "$REMOTE_HOST" ]; then
   if [ "$(fm_meta_get "$META" remote_backend)" != hc ]; then
@@ -418,13 +420,16 @@ if [ -n "$REMOTE_HOST" ]; then
     relaunch)
       [ "$ACCOUNT_SET" = 0 ] || die "--account applies to a local worker's account pin; a remote secondmate's account lives in its home on $REMOTE_HOST"
       [ "$NOTE_SET" = 0 ] || die "--note applies to a local relaunch's progress note; a remote secondmate relaunch on $REMOTE_HOST carries no note"
+      remote_prior_harness=$(fm_meta_get "$META" harness)
       remote_harness=$NEW_HARNESS
-      [ "$HARNESS_SET" = 1 ] || remote_harness=$(fm_meta_get "$META" harness)
+      [ "$HARNESS_SET" = 1 ] || remote_harness=$remote_prior_harness
       [ -n "$remote_harness" ] || die "remote secondmate $ID's route record names no harness; pass --harness to choose its runtime deliberately"
       remote_model=$NEW_MODEL
-      [ "$MODEL_SET" = 1 ] || remote_model=$(fm_meta_get "$META" model)
       remote_effort=$NEW_EFFORT
-      [ "$EFFORT_SET" = 1 ] || remote_effort=$(fm_meta_get "$META" effort)
+      if [ "$remote_harness" = "$remote_prior_harness" ]; then
+        [ "$MODEL_SET" = 1 ] || remote_model=$(fm_meta_get "$META" model)
+        [ "$EFFORT_SET" = 1 ] || remote_effort=$(fm_meta_get "$META" effort)
+      fi
       remote_rc=0
       "$SCRIPT_DIR/fm-remote-secondmate-relaunch.sh" "$ID" "$remote_harness" \
         "${remote_model:-default}" "${remote_effort:-default}" </dev/null || remote_rc=$?

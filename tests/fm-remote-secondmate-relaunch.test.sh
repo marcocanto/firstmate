@@ -296,7 +296,18 @@ OUT=$(run_control ios relaunch --harness claude --model claude-opus-5-5); RC=$?
 expect_code 0 "$RC" "a remote hc relaunch through fm-control failed"$'\n'"$OUT"
 assert_grep 'fm-remote-secondmate-control.sh relaunch ios' "$TMP/host.log" "the remote hc relaunch did not reach the host"
 assert_grep 'harness=claude' "$HOME_DIR/state/ios.meta" "fm-control's remote relaunch did not republish the parent record"
-assert_grep 'effort=medium' "$HOME_DIR/state/ios.meta" "an unset axis did not keep the recorded effort"
+assert_grep 'effort=default' "$HOME_DIR/state/ios.meta" "an unset axis kept the previous harness's effort across a harness change"
+: > "$TMP/host.log"
+OUT=$(run_control ios relaunch --harness pi); RC=$?
+expect_code 0 "$RC" "a remote hc relaunch onto another harness failed"$'\n'"$OUT"
+assert_grep 'model=default' "$HOME_DIR/state/ios.meta" "the previous harness's model carried over a harness change"
+assert_no_grep 'model=claude-opus-5-5' "$HOME_DIR/state/ios.meta" "the claude model was sent to the pi relaunch"
+reset_hc_meta
+OUT=$(run_control ios relaunch --effort high); RC=$?
+expect_code 0 "$RC" "a remote hc relaunch on the same harness failed"$'\n'"$OUT"
+assert_grep 'harness=pi' "$HOME_DIR/state/ios.meta" "an unset harness did not keep the recorded harness"
+assert_grep 'model=openai-codex/gpt-5.6-sol' "$HOME_DIR/state/ios.meta" "an unset axis did not keep the recorded model on the same harness"
+assert_grep 'effort=high' "$HOME_DIR/state/ios.meta" "the given effort was not applied"
 OUT=$(run_control ios relaunch --account other); RC=$?
 [ "$RC" -ne 0 ] || fail "an account switch was accepted for a remote hc mate"
 assert_contains "$OUT" "a remote secondmate's account lives in its home on remote-mac" "the account refusal was not explained"
