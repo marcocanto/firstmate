@@ -220,6 +220,11 @@
 #
 # Usage: fm-pr-merge.sh <task-id> <pr-url> [--attended-override] [--update-branch] [--expected-head <full-sha>] [--allow-red <check-name>] [--allow-missing <check-name>] [--allow-no-pipeline] [-- <extra forge merge args>]
 #
+# On GitHub, a pull request that reads back as queued is recorded in
+# state/<id>.pr-queued (bin/fm-pr-lib.sh), and the merge poll reports it once if
+# GitHub later removes it from the queue without merging it
+# (bin/fm-merge-outcome-lib.sh publishes that report).
+#
 # On GitLab, this script confirms the MR is actually merged before reporting it;
 # an auto-merge-queued or unconfirmed request leaves the poll armed and records
 # no landed outcome. bin/fm-merge-outcome-lib.sh owns a confirmed merge's
@@ -1968,6 +1973,12 @@ case "$PROVIDER" in
     elif [ "$FM_PR_GITHUB_QUEUED" = true ]; then
       printf 'verified: %s is queued (state=%s, merged=%s, isInMergeQueue=%s)\n' \
         "$URL" "$FM_PR_GITHUB_STATE" "$FM_PR_GITHUB_MERGED" "$FM_PR_GITHUB_QUEUED"
+      # Record the queueing so the merge poll can report GitHub taking the pull
+      # request back out of the queue without merging it. The pull request is
+      # queued either way, so a failed record is reported and not a failed merge.
+      fm_pr_queued_record "$STATE" "$ID" "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
+        || printf 'actionable: %s is queued but the queueing could not be recorded, so a removal from the merge queue will not be reported\n' \
+          "$URL" >&2
       exit 0
     else
       github_report_forge_output "$merge_output"

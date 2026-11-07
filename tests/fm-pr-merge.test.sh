@@ -1686,6 +1686,10 @@ test_github_queued_outcome_is_verified() {
     "github-verified-queued: the forge CLI's unverified merged report leaked through"
   assert_grep 'pr=https://github.com/example/repo/pull/53' "$case_dir/state/task-x1.meta" \
     "github-verified-queued: the queued PR was not recorded for teardown"
+  [ -f "$case_dir/state/task-x1.pr-queued" ] \
+    || fail "github-verified-queued: the queueing was not recorded for the merge poll"
+  bash -c '. "$1/bin/fm-pr-lib.sh" && fm_pr_metadata_identity_parse "$2"' _ "$ROOT" "$case_dir/state/task-x1.meta" \
+    || fail "github-verified-queued: recording the queueing broke the task metadata identity"
   pass "fm-pr-merge accepts and accurately reports a GitHub merge-queue entry"
 }
 
@@ -3290,6 +3294,8 @@ test_queued_gitlab_merge_leaves_the_poll_armed() {
     "queued-gitlab-merge: a queued merge was reported as landed"
   [ -f "$case_dir/state/task-x1.check.sh" ] \
     || fail "queued-gitlab-merge: the merge poll was not left armed"
+  [ ! -e "$case_dir/state/task-x1.pr-queued" ] \
+    || fail "queued-gitlab-merge: a GitLab merge request got a GitHub queue record"
   [ ! -e "$case_dir/state/task-x1.pr-poll-merge-notified" ] \
     || fail "queued-gitlab-merge: a queued merge was marked as reported"
   pass "a queued GitLab merge stays silent and leaves confirmation to the armed poll"

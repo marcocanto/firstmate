@@ -22,6 +22,12 @@
 # is committed, so a failed commit stays eligible for at-least-once retry and
 # may rarely duplicate rather than leave a merge silent.
 #
+# fm_merge_unqueued_report publishes the other poll outcome the same way: GitHub
+# took a pull request this home queued back out of the merge queue without
+# merging it. It uses the same destination rules and wake shape, keyed by the
+# queueing epoch so each removal reports once and a later queueing reports
+# again. A confirmed merge also consumes the queue marker.
+#
 # Sourced by bin/fm-pr-merge.sh, bin/fm-watch.sh, and tests. No side effects on
 # source beyond its sourced libraries.
 
@@ -109,7 +115,53 @@ fm_merge_outcome_report() {  # <home> <state> <task-id> <pr-url> <origin> [autho
       "$provider" "$host" "$path" "$number" || status=1
   fi
   fm_lock_release "$lock"
+  # A merged pull request has no queue entry left to report on.
+  [ "$status" -ne 0 ] || fm_pr_queued_remove "$state" "$id" || true
   # Opt-in fleet activity ledger (docs/fleet-ledger.md); off costs one file test.
   [ ! -e "${FM_CONFIG_OVERRIDE:-$home/config}/fleet-ledger" ] || [ "$status" -ne 0 ] || FM_HOME=$home FM_STATE_OVERRIDE=$state "$_FM_MERGE_OUTCOME_LIB_DIR/fm-fleet-ledger.sh" merged "$id" pr "$FM_PR_URL" || true
+  return "$status"
+}
+
+# fm_merge_unqueued_report <home> <state> <task-id> <pr-url> <queued-epoch> [reason]
+#
+# Publishes one removal from the merge queue, then consumes the task's queue
+# marker so the poll stays silent until the pull request is queued again. The
+# line is published before the marker is consumed, so an interrupted run
+# repeats the publication, which the parent channel's duplicate check absorbs.
+# <reason> is the poll's removal reason token and is optional.
+# Returns 0 when the removal is recorded, 2 on an invalid request, 3 when this
+# home's role or parent binding cannot be read, and 1 on any other failure.
+fm_merge_unqueued_report() {  # <home> <state> <task-id> <pr-url> <queued-epoch> [reason]
+  local home=$1 state=$2 id=$3 url=$4 epoch=$5 reason=${6-}
+  local self_rc=0 destination='' line note status=0 key
+  # shellcheck disable=SC2034 # Sourced wake helpers consume these scoped globals.
+  local STATE FM_WAKE_QUEUE FM_WAKE_QUEUE_LOCK
+  fm_pr_task_id_valid "$id" || return 2
+  fm_pr_url_parse "$url" || return 2
+  case "$epoch" in ''|*[!0-9]*) return 2 ;; esac
+  case "$reason" in *[!A-Za-z0-9_]*) return 2 ;; esac
+  [ -d "$state" ] && [ ! -L "$state" ] || return 1
+  key="unqueued-$id-$epoch"
+  note="left the merge queue without merging: $id $FM_PR_URL"
+  [ -z "$reason" ] || note="$note reason=$reason"
+
+  if destination=$(fm_parent_channel_destination "$home" "$state"); then
+    line="failed [key=$key]: $note"
+  else
+    self_rc=$?
+    [ "$self_rc" -eq 1 ] || return 3
+    destination=''
+  fi
+
+  STATE=$state
+  # shellcheck source=bin/fm-wake-lib.sh
+  . "$_FM_MERGE_OUTCOME_LIB_DIR/fm-wake-lib.sh"
+  if [ -n "$destination" ]; then
+    fm_parent_channel_append_once "$destination" "$(status_stamp_line "$line")" || status=1
+  fi
+  if [ "$status" -eq 0 ]; then
+    fm_wake_append check "$key" "check: $note" || status=1
+  fi
+  [ "$status" -ne 0 ] || fm_pr_queued_remove "$state" "$id" || status=1
   return "$status"
 }
