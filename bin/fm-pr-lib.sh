@@ -1629,6 +1629,7 @@ fm_pr_queued_marker_read() {  # <marker> <device> <provider> <host> <path> <numb
     && [ "$path" = "$expected_path" ] \
     && [ "$number" = "$expected_number" ] || return 1
   case "$epoch" in ''|*[!0-9]*) return 1 ;; esac
+  # shellcheck disable=SC2034 # Public result consumed by sourcing callers.
   FM_PR_QUEUED_EPOCH=$epoch
 }
 
