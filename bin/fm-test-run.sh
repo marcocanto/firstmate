@@ -889,6 +889,7 @@ tests/fm-remote-job-orphan-reap.test.sh 2985
 tests/fm-remote-job-process-start.test.sh 11871
 tests/fm-remote-job.test.sh 81046
 tests/fm-remote-reply.test.sh 140887
+tests/fm-remote-secondmate-hc.test.sh 65000
 tests/fm-remote-secondmate-lifecycle-e2e.test.sh 1005249
 tests/fm-remote-secondmate-parent-binding.test.sh 42294
 tests/fm-remote-secondmate-relaunch.test.sh 879

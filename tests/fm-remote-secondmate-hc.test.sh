@@ -78,6 +78,7 @@ ctl() {
 calls() { wc -l < "$HC_STATE/log" 2>/dev/null | tr -d ' ' || printf 0; }
 
 tag_of() {  # <home> <root>
+  # shellcheck disable=SC2016 # $0 expands in the child shell, not here.
   env -u FM_ROOT_OVERRIDE FM_HOME="$1" FM_ROOT="$2" bash -c '. "$0/bin/fm-backend-hometag-lib.sh"; fm_backend_hometag' "$ROOT"
 }
 
