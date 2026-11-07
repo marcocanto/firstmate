@@ -392,10 +392,17 @@ fm_backend_hc_send_key() {  # <target> <key> [expected-label]
 }
 
 # fm_backend_hc_send_text_line: paste one line and submit it (`hc send`). The
-# `--` delimiter keeps flag-looking text from being parsed as options.
+# `--` delimiter keeps flag-looking text from being parsed as options. A
+# blocked refusal (exit 9) is retried with --force only when
+# fm_backend_hc_blocked_send_proven proves the block is Firstmate's own record
+# over an empty composer.
 fm_backend_hc_send_text_line() {  # <target> <text> [expected-label]
+  local rc=0
   fm_backend_hc_target_ready "$1" "${3:-}" || return 1
-  fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json "$FM_BACKEND_HC_ADDRESS" -- "$2" >/dev/null 2>&1
+  fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json "$FM_BACKEND_HC_ADDRESS" -- "$2" >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 9 ] || return "$rc"
+  fm_backend_hc_blocked_send_proven "$1" "${3:-}" || return "$rc"
+  fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json --force "$FM_BACKEND_HC_ADDRESS" -- "$2" >/dev/null 2>&1
 }
 
 fm_backend_hc_current_path() {  # <target> [expected-label]
@@ -417,6 +424,28 @@ fm_backend_hc_composer_state() {  # <target> [expected-label] -> empty|pending|p
   printf '%s' "$verdict"
 }
 
+# fm_backend_hc_blocked_send_proven: whether a send hc refused as blocked may
+# be repeated with --force. hc refuses `send` (never `keys`) to any terminal
+# whose root 7501 record says blocked, and fm-osc7501.sh publishes a worker's
+# open needs-decision or blocked status line as exactly such a record. That
+# record is attention for the operator, not a dialog in the program, so it
+# must not stop Firstmate from steering the worker. Both proofs are required:
+#   - the blocked record is Firstmate's own (app=firstmate-*). A blocked
+#     record from the program itself names a dialog Firstmate's screen reader
+#     may not recognize, so it is never forced.
+#   - one screen read classifies as an empty composer with no recognized
+#     blocking dialog. Held composer text, a picker, or an unreadable screen
+#     is never forced.
+fm_backend_hc_blocked_send_proven() {  # <target> [expected-label]
+  local target=$1 expected=${2:-} json app cap
+  json=$(fm_backend_hc_get "$target") || return 1
+  app=$(printf '%s' "$json" | jq -r 'if .status.state == "blocked" then (.status.app // "") else "" end' 2>/dev/null) || return 1
+  case "$app" in firstmate-?*) ;; *) return 1 ;; esac
+  cap=$(fm_backend_hc_visible_capture "$target" "$expected") || return 1
+  ! fm_composer_blocking_dialog "$cap" >/dev/null || return 1
+  [ "$(fm_composer_classify_screen "$(fm_backend_hc_composer_caps)" "$cap")" = empty ]
+}
+
 # fm_backend_hc_send_text_submit: one `hc send --wait`, which pastes, presses
 # Enter, and reports the turn it started. Echoes
 # empty|pending|pending-unproven|unknown|send-failed, a subset of the
@@ -427,8 +456,9 @@ fm_backend_hc_composer_state() {  # <target> [expected-label] -> empty|pending|p
 # started:null once the bounded wait times out; the send still typed and
 # entered, so the verdict falls back to the composer screen, and only a
 # proven pending composer gets Enter retries through the shared loop. A
-# blocked terminal refuses with exit 9 before typing - unknown, with a
-# diagnostic and no retries, never forced. The other structured refusals
+# blocked terminal refuses with exit 9 before typing; the send is repeated
+# with --force only under fm_backend_hc_blocked_send_proven, and otherwise it
+# is unknown, with a diagnostic and no retries. The other structured refusals
 # (3 not_found, 11 finished) and any other failure are send-failed.
 fm_backend_hc_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle> [expected-label]
   local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 expected=${6:-}
@@ -442,10 +472,15 @@ fm_backend_hc_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <s
   out=$(fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json "$FM_BACKEND_HC_ADDRESS" \
     --wait --timeout "$wait_secs" -- "$text" 2>&1)
   rc=$?
+  if [ "$rc" -eq 9 ] && fm_backend_hc_blocked_send_proven "$target" "$expected"; then
+    out=$(fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json --force "$FM_BACKEND_HC_ADDRESS" \
+      --wait --timeout "$wait_secs" -- "$text" 2>&1)
+    rc=$?
+  fi
   case "$rc" in
     0) ;;
     9)
-      echo "error: hc send refused $target - the terminal is blocked waiting on input (never forced): $out" >&2
+      echo "error: hc send refused $target - the terminal is blocked waiting on input and Firstmate could not prove its own status over an empty composer (not forced): $out" >&2
       printf 'unknown'
       return 0
       ;;
