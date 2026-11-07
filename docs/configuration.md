@@ -586,7 +586,9 @@ Paseo and tern stay explicit-only because their runtime markers leak into every 
 ### Accepted backends and secondmate limits
 
 Any value other than `tmux`, `herdr`, `zellij`, `orca`, `cmux`, `paseo`, `rex`, `t3code`, `tern`, or `hc` is rejected until another adapter is implemented and verified.
-`fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, `cmux`, `paseo`, `rex`, `t3code`, `tern`, and `hc` for ship and scout tasks; `backend=orca`, `backend=cmux`, `backend=paseo`, `backend=tern`, and `backend=hc` all still refuse `--secondmate` until secondmate launch semantics are designed for each, while `backend=t3code` supports secondmates and runs only the `claude` and `codex` harnesses.
+`fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, `cmux`, `paseo`, `rex`, `t3code`, `tern`, and `hc` for ship and scout tasks.
+`backend=orca`, `backend=cmux`, `backend=paseo`, and `backend=tern` still refuse `--secondmate` until secondmate launch semantics are designed for each; `FM_BACKEND_SECONDMATE` in [`bin/fm-backend.sh`](../bin/fm-backend.sh) is the one owner of that list.
+`backend=t3code` supports secondmates and runs only the `claude` and `codex` harnesses, and `backend=hc` supports secondmates as [Second mates](hc-backend.md#second-mates) describes.
 
 `codex-app` is not an accepted runtime backend yet; [`docs/codex-app-backend.md`](codex-app-backend.md) owns the Codex App boundary.
 
@@ -662,14 +664,20 @@ The local `config/herdr-presentation-spaces` file instead opts a home out of, or
 The setting is inherited into secondmate homes under the primary-authoritative contract owned by [`secondmate-provisioning`](../.agents/skills/secondmate-provisioning/SKILL.md).
 The local `config/herdr-project-groups` file opts a home in to display-only Herdr project groups; [Project groups](herdr-backend.md#project-groups) owns its values, rules, tags, inheritance, and limits.
 
+For normal herdr operations, `HERDR_SESSION` selects the named session, but destructive test cleanup must not rely on `HERDR_SESSION` alone.
+Use the explicit guarded cleanup path described in [`docs/herdr-backend.md`](herdr-backend.md) instead of `herdr server stop`.
+
 ### Rex attention marks
 
 The local `config/rex-status-marks` file opts a home in to Rex attention marks: `on` sets a program-status badge and a notification on the pane of a Rex worker that needs the captain, plus validation progress in its hover card, and `off` (the default when absent) shows none of them.
 [Attention marks](rex-backend.md#attention-marks) owns the status mapping and its limits.
 The local `config/rex-tint` file opts in to a subtle background tint on waiting and failed workers: `off` (the default when absent), `subtle`, or `subtle-light`; [State tint](rex-backend.md#state-tint) owns its behavior and caveats.
 
-For normal herdr operations, `HERDR_SESSION` selects the named session, but destructive test cleanup must not rely on `HERDR_SESSION` alone.
-Use the explicit guarded cleanup path described in [`docs/herdr-backend.md`](herdr-backend.md) instead of `herdr server stop`.
+### OSC 7501 worker status reporting
+
+Firstmate launches a worker-side OSC 7501 Program Status Protocol bridge so supporting terminals can display task status even when the harness does not report it natively.
+[`bin/fm-osc7501.sh`](../bin/fm-osc7501.sh)'s header owns passive terminal eligibility and input safety, native-reporter exclusion, signal precedence and activity sources, record fields, and watcher lifecycle.
+The local `config/osc7501-status` file gates the feature per home: `on` (the default when absent) or `off`; an unrecognized word reads as off and warns once per value in the next worker pane that passes the header's writable-tty and known-aware-terminal gates.
 
 ### Zellij sessions
 
@@ -920,6 +928,7 @@ state/<task>.{meta,status}
 state/<task>.inbox/{,handled/}NNN.msg
 ```
 
+Sync skips hidden names in `state/`, such as `.startup-network.status`, because they are Firstmate records rather than task records.
 The command is one-shot and starts no network transfer, daemon, timer, or watcher.
 It does not recursively copy `data/` or `state/`, accept arbitrary sources, discover secrets, or redact content.
 The exporter opens source and destination components relative to verified directory descriptors with no-follow semantics, then rechecks source identity and content before publication.
@@ -1968,8 +1977,16 @@ Secondmate homes inherit this file from the primary, so a secondmate's own crewm
 Each setting comes from the calling environment or the home's gitignored `.env` through `bin/fm-env-lib.sh`; a non-empty environment value wins.
 OpenRouter, `systemone`, and OpenAI each require their explicit `FM_DISPATCH_PROVIDER` value and a non-empty `FM_DISPATCH_MODEL`; an omitted model is an actionable configuration error, and the presence of a provider's key never selects that provider by itself.
 `systemone` also requires `FM_DISPATCH_BASE_URL`, an `http://` or `https://` base such as a local llama.cpp server or a hosted System One-compatible service, and posts to `<base>/v1/systemone`; a missing or scheme-less base URL is an actionable configuration error.
-With no provider setting, the original typesafe.ai behavior is unchanged: `jev-latest` is used when `TYPESAFE_API_KEY` is available, `FM_DISPATCH_MODEL` is ignored, and the resolver is off when no key is available and no `typesafe` credential source is declared.
+With no provider setting and a valid base, TypeSafe uses `jev-latest` when `TYPESAFE_API_KEY` is available, ignores `FM_DISPATCH_MODEL`, and is off when no key is available and no `typesafe` credential source is declared.
 Explicit `FM_DISPATCH_PROVIDER=typesafe` also uses `jev-latest` when no model is set.
+`TYPESAFE_BASE` optionally selects a different base for the TypeSafe request, from the environment or `.env` with the same non-empty-environment precedence.
+If neither source supplies a non-empty value, the base defaults to `https://api.typesafe.ai`.
+It must be an `http://` or `https://` URL with a host and no userinfo, query, fragment, whitespace, or backslash.
+An explicit port must be between 1 and 65535, and a bracketed host must be a valid IPv6 address.
+Its path must not contain literal `[` or `]` characters; IPv6 host brackets remain supported.
+An invalid value exits 2 before credential lookup and sends nothing, even when no key is available.
+Trailing slashes are removed before appending `/v1/systemone`, so `TYPESAFE_BASE=https://ai-gateway.vercel.sh/typesafe/` sends to `https://ai-gateway.vercel.sh/typesafe/v1/systemone`.
+To select a gateway-specific model ID, set `FM_DISPATCH_PROVIDER=typesafe` and `FM_DISPATCH_MODEL` to that ID.
 The selected provider needs a non-empty key from the environment, else `.env`, else, for `typesafe` and `openrouter` only, the credential source the home declares for that provider; `systemone` is the exception, where an absent `FM_DISPATCH_API_KEY` means the request carries no `Authorization` header.
 
 Off means one `dispatch-resolve: off` line on stderr, nothing on stdout, exit 0, and no network call, so firstmate dispatches exactly as it does without the tool.
@@ -2072,7 +2089,7 @@ No qualifying option, or two equally probable qualifying options, produces `ambi
 Every result above exits 0.
 
 - Response probabilities must contain exactly every offered choice, use numeric values from 0 through 1, and sum to approximately 1 within 0.01.
-- Only a usage or configuration error exits 2: an unreadable brief, an existing but unreadable or malformed canonical rules file, an unreadable or invalid credential source declaration, a missing `jq`, an unknown provider, a non-typesafe provider without a model, or `systemone` without a valid base URL, each reported and never selected around.
+- Only a usage or configuration error exits 2: an unreadable brief, an existing but unreadable or malformed canonical rules file, an unreadable or invalid credential source declaration, a missing `jq`, an unknown provider, a non-typesafe provider without a model, an invalid `TYPESAFE_BASE` for TypeSafe, or `systemone` without a valid base URL, each reported and never selected around.
 - Missing `curl` is a normal structured `error` outcome with exit 0 so firstmate uses today's routing.
 
 **Firstmate retains the dispatch decision**
@@ -2136,7 +2153,7 @@ An installer should treat any status other than 0 as a refusal, because a resolv
 - The resolver copies every environment-provided key into a non-exported private variable and unsets `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, and `FM_DISPATCH_API_KEY` before launching child processes; bootstrap also protects the typesafe key.
 - A key read from a declared source is captured into the same private variable, so it is never exported either.
 - The resolver sends only the selected key to `curl` as a header read from a file descriptor, never on argv, and never prints, logs, or writes any key.
-- The typesafe.ai endpoint is `https://api.typesafe.ai/v1/systemone`, the OpenRouter endpoint is `https://openrouter.ai/api/alpha/decisions`, the OpenAI endpoint is `https://api.openai.com/v1/decisions`, and the `systemone` endpoint is `<FM_DISPATCH_BASE_URL>/v1/systemone`.
+- TypeSafe endpoint selection follows `TYPESAFE_BASE` above; the OpenRouter endpoint is `https://openrouter.ai/api/alpha/decisions`, the OpenAI endpoint is `https://api.openai.com/v1/decisions`, and the `systemone` endpoint is `<FM_DISPATCH_BASE_URL>/v1/systemone`.
 - The default confidence floor remains 0.6; request timeouts are 5 seconds for typesafe.ai and 10 seconds for OpenRouter, `systemone`, and OpenAI.
 - A CPU-only local `systemone` host may not answer within its 10-second timeout; that is an ordinary `error` outcome, and firstmate keeps its existing intake.
 
@@ -3179,7 +3196,7 @@ KNOWN LIMIT: while any activity continues in a home whose original owning sessio
 
 Detaching a runner into its own process group is what lets a persistent source outlive the turn that armed it, and on its own it is also what lets a runner outlive its whole home: reparented to init, it keeps its blocking child - and every process that child spawns - running with nothing left to reap it.
 
-- So a home's process-event state carries a lease that registration, attached start, reconciliation, acknowledgement, and listing refresh, and the watcher's reconcile cycle is what keeps it fresh in a live home.
+- So a home's process-event state carries a lease that registration, attached start, reconciliation, acknowledgement, listing, and detached launch by a non-runner caller through `reconcile` or `ensure-listening` refresh, and the watcher's reconcile cycle is what keeps it fresh in a live home.
 - An attached public `start` continues refreshing the lease while its caller remains attached.
 - Each runner fails closed unless a small guard starts successfully beside it in a separate process group.
 - That guard accepts the lease only while the state root retains the device/inode identity recorded by the runner's claim, and initiates the verified stop after two consecutive reads cannot prove that identity and lease freshness, so one unreadable read cannot kill a live runner.
@@ -3414,6 +3431,7 @@ FM_DISPATCH_MODEL=      # explicit model for the selected provider; required for
 FM_DISPATCH_BASE_URL=   # http(s) base of a System One-compatible host; required for systemone
 FM_DISPATCH_API_KEY=    # optional systemone key; absent sends no Authorization header
 TYPESAFE_API_KEY=       # typesafe dispatch key, from the environment, .env, or the declared credential source ("Typed dispatch resolution")
+TYPESAFE_BASE=          # optional TypeSafe base; see "Typed dispatch resolution"
 OPENROUTER_API_KEY=     # OpenRouter dispatch key, from the environment, .env, or the declared credential source
 OPENAI_API_KEY=         # OpenAI dispatch key, from the environment or .env
 FMX_DISCORD_REPLY_MAX_CHARS=1900   # Discord reply per-message split budget; values below 50 clamp to 50, values above 2000 reset to 1900
@@ -3537,7 +3555,15 @@ Apart from a first-sight classification, only a pane that leaves the stale path,
 That shared reset is what makes the release structural rather than a list of sites to keep in step.
 At the first-sight routes the reset is also opt-in per site: under a configured cap the count restarts with the released episode, while with the cap at its default 0 the count survives those routes exactly as the pre-cap watcher's did - the timer dropped and re-armed (or dropped alone), the escalation count standing - so a home that has not set anything keeps today's ladder, including the `demand-deep-inspection` prompt for a stuck pane.
 An operator can re-engage a capped window at once by deleting its `state/.wedge-permanent-<key>` marker, and a window silenced by a failed cap-state write by deleting its `state/.wedge-rollback-failed-<key>` sentinel; both files are safe to delete, and the window then escalates on the ordinary schedule again.
+[`bin/fm-watch-key-lib.sh`'s header](../bin/fm-watch-key-lib.sh) owns `<key>` derivation and the optional cleanup procedure for obsolete per-endpoint markers.
 Turning the cap back off takes effect at once: every cap marker is read only while the cap is configured, so a leftover from an earlier configured run cannot keep a window silent in a home that has turned the cap off.
+
+Upgrading a live home to the bounded `v3.` watcher keys intentionally resets its per-endpoint observation caches once, including stale timers, escalation counts, cap markers, and pause/wait notification throttles.
+A previously capped window can start a fresh escalation ladder under the configured cap, and stale or declared-wait notifications can repeat before their new throttles are established.
+This reset is harmless to running tasks and durable recovery state: task status, metadata, and wake queues are preserved, and a wedge notification never automatically interrupts, signals, or restarts a worker.
+Declared pauses and waits are classified again from their existing evidence.
+Their old notification throttles are not carried forward.
+Legacy keys can conflate different endpoints, so importing their history could suppress a current endpoint using another endpoint's evidence.
 
 `fm-teardown.sh` retries only Git's `Unable to create '...index.lock': File exists` return failure up to `FM_TREEHOUSE_RETURN_LOCK_RETRIES` times.
 `FM_TREEHOUSE_RETURN_LOCK_RETRIES` accepts a nonnegative integer, and an unset, blank, or invalid value uses the default of 3.

@@ -59,7 +59,8 @@
 #              always REFUSES: a task record carries no socket identity for its
 #              endpoint, so this verb cannot tell a destroyed window from one on
 #              a tmux server it cannot address, and it will not claim a stop it
-#              cannot see.
+#              cannot see. hc likewise refuses missing or finished terminals:
+#              its record has no core or socket identity to prove absence.
 #              Refused on t3code before anything is sent: T3's `/mcp` tools
 #              have no session stop (bin/fm-control-lib.sh
 #              fm_control_backend_exit_supported); interrupt ends its turn.
@@ -140,7 +141,7 @@
 #   - A backend that cannot deliver the harness's interrupt key is refused
 #     (Orca's terminal API has no Escape).
 #   - `exit` and `relaunch` require a backend with a recovery-grade agent-state
-#     classifier (tmux, herdr, rex, or t3code), because without one the "the
+#     classifier (tmux, herdr, rex, hc, or t3code), because without one the "the
 #     agent stopped" postcondition cannot be proven. Relaunch also requires
 #     replacement support, which t3code lacks. zellij, orca, cmux, paseo, and tern are
 #     refused rather than reported as successful blind.
@@ -356,9 +357,17 @@ ID=$RAW_ID
 fm_lease_guard "$ID" "lifecycle control (fm-control)"
 CONTROL_LOCK="$STATE/.control-$ID.lock"
 trap control_cleanup EXIT
-fm_lock_try_acquire "$CONTROL_LOCK" \
-  || die "another lifecycle action is already running for task $ID"
-CONTROL_LOCK_HELD=1
+# A parent that already holds this task's control lock (bin/fm-secondmate-move.sh
+# stopping the mate it moves) hands it down, the same way this script hands it
+# to bin/fm-spawn.sh --relaunch; the parent keeps releasing it.
+control_owner=$(cat "$CONTROL_LOCK/pid" 2>/dev/null || true)
+if [ -n "$control_owner" ] && [ "$control_owner" = "$PPID" ] && fm_pid_alive "$control_owner"; then
+  CONTROL_LOCK_HELD=0
+else
+  fm_lock_try_acquire "$CONTROL_LOCK" \
+    || die "another lifecycle action is already running for task $ID"
+  CONTROL_LOCK_HELD=1
+fi
 # do_exit runs in a command substitution. That subshell does not run this
 # EXIT trap, so the parent has to hold the path the trap removes. Set it
 # only once the lock is held: a process that loses the lock runs the same
@@ -397,6 +406,8 @@ RECORDED_HARNESS=$(fm_meta_get "$META" harness)
 KIND=$(fm_meta_get "$META" kind)
 WT=$(fm_meta_get "$META" worktree)
 [ -n "$KIND" ] || KIND=ship
+[ "$BACKEND" != hc ] || [ "$KIND" != secondmate ] \
+  || die "the hc backend does not support secondmate lifecycle control"
 # OpenCode's composer exit key changed between its 1.x and 2.x lines; the major
 # spawn detected is recorded here so the exit command below matches the running
 # agent. Absent (a legacy record or a non-opencode task) it stays empty.
@@ -419,7 +430,7 @@ fi
 # --- shared helpers ---------------------------------------------------------
 
 agent_state() {
-  fm_backend_agent_state "$BACKEND" "$T"
+  fm_backend_agent_state "$BACKEND" "$T" "$LABEL"
 }
 
 busy_verdict() {

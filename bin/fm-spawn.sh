@@ -79,10 +79,10 @@
 #   makes a harness switch one ordinary relaunch. It refuses unless the
 #   recorded endpoint is positively agent-free on a backend with both a
 #   recovery-grade agent-state classifier and replacement-agent support
-#   (tmux or herdr), and clears the previous harness's per-task wiring
-#   before arming the new incarnation. T3 Code has the classifier but refuses
-#   relaunch because a thread keeps its conversation across turns and provider
-#   changes. Two verdicts are agent-free: a `dead`
+#   (tmux, herdr, rex, or hc), and clears the previous harness's per-task
+#   wiring before arming the new incarnation. T3 Code has the classifier but
+#   refuses relaunch because a thread keeps its conversation across turns and
+#   provider changes. Two verdicts are agent-free: a `dead`
 #   endpoint is ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
 #   worktree and the republished record rebinds the task to it. That proof is
 #   its own step, because a backend's `missing` also covers an endpoint that is
@@ -145,8 +145,12 @@
 #   top-level shell into it, because a restart restores that shell's cwd.
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
 #   blocked backend contract. Default tmux spawns do not write backend= to meta;
-#   absent backend= means tmux. Orca, cmux, paseo, tern, and hc do not support
-#   --secondmate spawns.
+#   absent backend= means tmux. Orca, cmux, paseo, and tern do not support
+#   --secondmate spawns (bin/fm-backend.sh's FM_BACKEND_SECONDMATE owns that
+#   list). An hc --secondmate launch keeps this home's identity labels on the
+#   mate's terminal but places it in the mate home's OWN Herdr.app space, the
+#   one that home's crew will label their terminals into, so the app shows the
+#   mate as its own agent with its crew beside it (the hc arm below).
 #   A rex crewmate or scout opens one tab in the Rex session the launching
 #   firstmate runs in when it runs directly inside Rex, otherwise in its home's
 #   own Rex session; a --secondmate launch opens its tab in that secondmate
@@ -2411,24 +2415,10 @@ if [ "$RELAUNCH" -eq 0 ]; then
   fi
   fm_backend_validate_spawn "$BACKEND" || exit 1
   fm_backend_source "$BACKEND" || exit 1
-  if [ "$BACKEND" = orca ] && [ "$KIND" = secondmate ]; then
-    echo "error: backend=orca does not support --secondmate spawns yet" >&2
-    exit 1
-  fi
-  if [ "$BACKEND" = cmux ] && [ "$KIND" = secondmate ]; then
-    echo "error: backend=cmux does not support --secondmate spawns yet" >&2
-    exit 1
-  fi
-  if [ "$BACKEND" = paseo ] && [ "$KIND" = secondmate ]; then
-    echo "error: backend=paseo does not support --secondmate spawns yet" >&2
-    exit 1
-  fi
-  if [ "$BACKEND" = tern ] && [ "$KIND" = secondmate ]; then
-    echo "error: backend=tern does not support --secondmate spawns yet" >&2
-    exit 1
-  fi
-  if [ "$BACKEND" = hc ] && [ "$KIND" = secondmate ]; then
-    echo "error: backend=hc does not support --secondmate spawns yet" >&2
+  # bin/fm-backend.sh's FM_BACKEND_SECONDMATE owns which backends host a
+  # persistent second mate and why the others do not.
+  if [ "$KIND" = secondmate ] && ! fm_backend_secondmate_supported "$BACKEND"; then
+    echo "error: backend=$BACKEND does not support --secondmate spawns yet" >&2
     exit 1
   fi
   fm_backend_runtime_check "$BACKEND" || exit 1
@@ -2532,7 +2522,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # endpoint was DESTROYED" with "the endpoint is UNREACHABLE from here right
   # now", and an unreachable endpoint can still hold the live agent this
   # relaunch would duplicate. So absence is PROVEN before it may rebind, never
-  # inferred from a failed read - and only HERDR and REX can prove it:
+  # inferred from a failed read - and only HERDR and REX can prove it (tmux and
+  # hc refuse):
   #   herdr - the recorded session's server is started, and the recorded pane is
   #           RE-READ through that session's own socket. `dead` means the pane
   #           survived the restart and is adopted after all; `alive` means the
@@ -2550,12 +2541,16 @@ if [ "$RELAUNCH" -eq 1 ]; then
   #           from "on a server I cannot see". A tmux `missing` therefore stays
   #           as deadlocked as it was before this change - deliberately, and
   #           with the reason stated rather than guessed past.
+  #   hc    - REFUSES, always, for the same reason: the record holds only
+  #           hc_session and hc_terminal, and a fresh core or another runtime
+  #           dir answers not_found, so a missing or finished terminal is
+  #           never proof the agent is gone.
   # Every transient or self-contradicting read stays `unreadable`/`ambiguous`
   # and refuses as it always did (bin/fm-backend.sh's fm_backend_agent_state
   # owns that vocabulary). The proof itself lives in one place for the whole
   # control plane - fm_control_endpoint_absence_verdict - so `exit` and
   # `relaunch` cannot reach two different answers about one endpoint.
-  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
+  RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET" "fm-$ID")
   if fm_control_absence_recheck_applies "$BACKEND" "$RELAUNCH_STATE"; then
     RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_META")
     case "${RELAUNCH_ABSENCE%%$'\t'*}" in
@@ -2579,6 +2574,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
   RELAUNCH_PRIOR_HARNESS=$(fm_meta_get "$RELAUNCH_META" harness)
   KIND=$(fm_meta_get "$RELAUNCH_META" kind)
   [ -n "$KIND" ] || KIND=ship
+  if [ "$BACKEND" = hc ] && [ "$KIND" = secondmate ]; then
+    echo "error: backend=hc does not support --secondmate relaunches" >&2
+    exit 1
+  fi
   # A secondmate whose endpoint is gone already has ONE owner for that
   # recovery: the session-start liveness sweep respawns it with
   # `fm-spawn.sh <id> --secondmate`, which stands its home's own workspace back
@@ -2662,6 +2661,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
     FM_REX_TASK_WINDOW_ID=$(fm_meta_get "$RELAUNCH_META" rex_window_id)
     FM_REX_TASK_BLOCK_ID=$(fm_meta_get "$RELAUNCH_META" rex_block_id)
     FM_REX_TASK_SERVER=$(fm_meta_get "$RELAUNCH_META" rex_server)
+  fi
+  if [ "$BACKEND" = hc ]; then
+    HC_SES=$(fm_meta_get "$RELAUNCH_META" hc_session)
+    HC_TERMINAL=$(fm_meta_get "$RELAUNCH_META" hc_terminal)
   fi
   # With no explicit harness, a relaunch reuses the harness already recorded
   # for this task. It must NOT fall through to the fresh-spawn config
@@ -5320,7 +5323,26 @@ EOF
     ;;
   hc)
     HC_SES=$(fm_backend_hc_container_ensure) || exit 1
-    HC_TERMINAL=$(fm_backend_hc_create_task "$HC_SES" "$W" "$PROJ_ABS") || exit 1
+    if [ "$KIND" = secondmate ]; then
+      # Identity stays this home's: the record lives in this home's state/,
+      # and every later read, input, and close checks the terminal's
+      # firstmate.task and firstmate.home labels against THIS process's
+      # hometag. Presentation is the mate's own: Herdr.app groups terminals
+      # by herdr.space, and the mate's crew will label their terminals with
+      # the mate home's tag (inside the mate's own session FM_HOME and
+      # FM_ROOT both resolve to that home), so the mate's terminal takes that
+      # same space and the app shows the mate as its own agent with its crew
+      # beside it. FM_HC_SPACE is deliberately not consulted here: it would
+      # move the mate out of the space its crew is about to use. The mate is
+      # also never a child of the launching Firstmate's own hc terminal (the
+      # adapter's caller-terminal placement): it is a peer agent, not crew,
+      # so HC_TERMINAL_ID is cleared for this one call and it starts
+      # --no-parent. Its own crew later become children of ITS terminal.
+      HC_MATE_SPACE="fm-$(FM_HOME="$PROJ_ABS" FM_ROOT="$PROJ_ABS" fm_backend_hometag)"
+      HC_TERMINAL=$(HC_TERMINAL_ID='' FM_HC_SPACE="$HC_MATE_SPACE" fm_backend_hc_create_task "$HC_SES" "$W" "$PROJ_ABS") || exit 1
+    else
+      HC_TERMINAL=$(fm_backend_hc_create_task "$HC_SES" "$W" "$PROJ_ABS") || exit 1
+    fi
     T="$HC_SES:$HC_TERMINAL"
     ;;
   orca)
@@ -7708,6 +7730,40 @@ fi
 # LAUNCH_ENV_PREFIX construction below sets it again at the `env -i` boundary,
 # so under an enabled allowlist the switch is established before the wrapping
 # `/bin/sh` starts rather than only inside the command that shell runs.
+# Arm the worker-side OSC 7501 status reporter (bin/fm-osc7501.sh) inside the
+# launch before the agent command, so the reporter's parent is the pane shell
+# that runs the agent. The reporter header owns eligibility and native-version
+# gates; pass the executable the launch runs so the native probe reads its
+# version. A raw launch command establishes it only as a simple command whose
+# first word is a plain path to a harness with a launch template; a wrapper,
+# assignment prefix, quoted or expanded path, compound command, or unknown
+# adapter hides what actually runs, so it passes none and gets no reporter.
+# Its stderr stays on the pane so a config warning reaches the user. The `disarm` after the agent
+# command retires the reporter when the agent exits, because the pane shell
+# that sourced the launch outlives it. Newlines, not `;`, delimit the agent
+# command, so a raw launch ending in a separator or a comment stays intact.
+OSC7501_AGENT_BIN=
+if [ "$RAW_LAUNCH" = 0 ]; then
+  case "$HARNESS" in
+    pi | pi-signed) OSC7501_AGENT_BIN=${PI_BIN:-} ;;
+    muse) OSC7501_AGENT_BIN=${MUSE_BIN:-} ;;
+    *) OSC7501_AGENT_BIN=$HARNESS ;;
+  esac
+else
+  read -r osc7501_word _ <<<"$RAW_COMMAND"
+  case "$RAW_COMMAND" in
+    *[\;\&\|]* | *$'\n'*) ;;
+    *)
+      case "$osc7501_word" in
+        '' | *[!A-Za-z0-9._/+-]*) ;;
+        *) (launch_template "$HARNESS" "$KIND") >/dev/null 2>&1 && OSC7501_AGENT_BIN=$osc7501_word ;;
+      esac
+      ;;
+  esac
+fi
+LAUNCH="$(shell_quote "$FM_ROOT/bin/fm-osc7501.sh") arm --task $(shell_quote "$ID") --harness $(shell_quote "$HARNESS") --backend $(shell_quote "$BACKEND") --kind $(shell_quote "$KIND") --state $(shell_quote "$STATE_REAL") --config $(shell_quote "$CONFIG") --target $(shell_quote "$T") --agent-bin $(shell_quote "$OSC7501_AGENT_BIN") >/dev/null || true
+$LAUNCH
+$(shell_quote "$FM_ROOT/bin/fm-osc7501.sh") disarm --state $(shell_quote "$STATE_REAL") >/dev/null 2>/dev/null || true"
 if [ "$LAVISH_AXI_HOST_CONFIG_PRESENT" = 1 ]; then
   LAUNCH="export LAVISH_AXI_HOST=$(shell_quote "$LAVISH_AXI_HOST"); $LAUNCH"
 fi

@@ -3784,7 +3784,7 @@ The default socket path under the scratchpad temp directory exceeded the 103-byt
 | `hc kill <t>` on a live shell | Exit 0; `hc get` then reports `state: finished`, `reason: killed`. |
 | `hc rm <t>` after kill | Exit 0; `hc get` then exits 3. |
 | `hc send <t> 'cd /usr'` | Pasted and submitted; `foreground.cwd` became `/usr`. |
-| `hc --version` (0.1.14, 2026-10-30) | Prints `hc 0.1.14`; the adapter's binary gate requires this `hc x.y.z` shape at or above 0.1.14. |
+| `hc --version` (0.1.14, 2026-10-30) | Prints `hc 0.1.14`; the adapter's binary gate requires this `hc x.y.z` shape at or above 0.1.15, the first version where `hc run --name` was verified (0.1.14 was not checked for it). |
 | `hello` over `hc connect --session <s>` (0.1.14, 2026-10-30) | Answered `{"result":{"generation":1,...}}`; the adapter refuses any other generation. |
 | `hc send <t> --wait --timeout <n> -- <text>` (0.1.14, 2026-10-30) | Returns `{"started":<bool|null>,"wait":{"status",...}}`; `started:true` or `wait.status:working` natively confirms the submit. Exit 9 is `blocked` (never forced), 3 `not_found`, 11 `finished`; text after `--` survives leading dashes. |
 | `hc keys <t> -- <key>` (0.1.14, 2026-10-30) | Accepts the `--` delimiter before key names. |
@@ -3833,6 +3833,23 @@ bin/fm-teardown.sh e2e1
 | `bin/fm-teardown.sh e2e1` | `teardown e2e1 complete (window fme1:t1, ...)`; `hc ls --all` was empty and the worktree returned to the pool. |
 
 Before the launch-line fix the same spawn could not type `+`, which every launch line carries.
+
+### Placement beside Firstmate
+
+Measured on 2026-10-30 with `hc 0.1.14` on Linux (7.0.0, `bash` 5.3.9), against a private core as above.
+`tests/fm-backend-hc-smoke.test.sh` started a terminal labeled `herdr.space=smoke-space` as a stand-in for Firstmate's own, ran `fm_backend_hc_create_task` inside it, and ran it once more from outside any hc terminal:
+
+```text
+ok - hc smoke: create_task started fmt562734:t1
+ok - hc smoke: current_path follows the shell's cwd
+ok - hc smoke: send_text_line ran the command and capture shows its output
+ok - hc smoke: agent_state reads dead for a shell and alive for an agent-named foreground
+ok - hc smoke: kill closes and removes the terminal
+ok - hc smoke: a task created inside Firstmate's own hc terminal joins its space as its child
+FM_TEST_COMPLETE
+```
+
+The task created inside reported `parent` equal to the stand-in's address and `herdr.space=smoke-space`; the one created outside reported no parent and `herdr.space=fm-<hometag>`.
 
 ### Live guard
 
@@ -3888,8 +3905,106 @@ Real Herdr.app exercise on 2026-11-02: the official herdr-app 0.1.11 bundle (sha
 
 `bin/fm-supervisor-target-lib.sh` now resolves `$HC_TERMINAL_ID`+`$HC_TERMINAL_SOCKET` to `<session>:<address>`/`hc`; `bin/fm-supervise-daemon.sh` still supports only `tmux herdr rex t3code` and refuses the resolved backend loudly.
 
+### Local exit, replacement, and names
+
+Measured on 2026-10-31 on Linux with `hc 0.1.15` and `omp/18.14.1`.
+Every real-core command ran with a unique non-default `HC_SESSION`, scratch XDG state/runtime/config/data/cache directories, and inherited `HC_SOCKET`, `HC_TERMINAL_ID`, `HC_TERMINAL_SOCKET`, and `HC_SCOPE` removed.
+Each guard stopped only its own private core and removed its scratch directories on exit.
+No Herdr TUI session or Herdr.app window was changed.
+`hc run --name` is verified on `hc 0.1.15`, so the adapter's minimum `hc` version is 0.1.15.
+
+Refresh the liveness proof with:
+
+```sh
+bin/fm-test-run.sh tests/fm-backend-hc-liveness-live-e2e.test.sh
+```
+
+The installed supported harnesses classified `alive`: Claude Code 2.1.316, Codex 0.166.0, OpenCode 2.2.5, Pi 1.4.0, Grok 1.0.70, Cursor 2026.10.22-27dcf5f, Gemini 0.66.0, Muse 1.4.14-R7309.1, omp 18.14.1, and agy 1.4.12.
+Pi-signed, Kimi, Rovo, Devin, Polytoken, and Kiro were absent and explicitly reported unverified.
+Command Code and Cortex were not applicable because their launch adapters restrict them to tmux and Herdr.
+Re-run on 2026-11-06 on macOS with `hc 0.1.18`: Claude Code 2.1.304, Codex 0.166.0, Pi 1.1.0, omp 18.17.0, and agy 1.5.1 classified `alive`, and the guard reported the other harnesses absent or not applicable.
+
+Refresh the prompt-spending lifecycle proof with:
+
+```sh
+FM_HC_CONTROL_LIVE=1 bin/fm-test-run.sh tests/fm-control-hc-live-e2e.test.sh
+```
+
+The guard reads the core task name through both `hc get` and `hc ls`.
+It runs real omp, exits it through `fm-control`, checks that its process is gone and the shell remains, repeats the idempotent exit, then relaunches through the real launch owner.
+The replacement has a different process id but the same terminal address and name, a republished hc session/address record, the requested effort, and unchanged local edits.
+It also checks refusal with unsubmitted composer input and after the terminal is removed.
+Observed guard output:
+
+```text
+ok - hc control live: omp remains alive throughout a real shell-tool turn
+ok - hc control live: omp exits to a shell and repeated exit is idempotent
+ok - hc control live: replacement is alive in the same named terminal with local work preserved
+ok - hc control live: pending input and unprovable absence still refuse
+FM_TEST_COMPLETE
+```
+
+Re-run on 2026-11-06 on macOS with `hc 0.1.18` and `omp/18.17.0`, with the same four `ok` lines.
+omp 18.17 renders a bash tool call as a model-written title rather than `$ sleep 3`, and it runs that `sleep` without a separate child process, so the guard proves the shell-tool turn with a marker file the tool command creates.
+With omp's `tui.vimMode` on, the composer showed NORMAL mode after the refused `exit`, where Ctrl+U does not edit, so the guard enters insert mode with `A` before its Ctrl+U clears the pending input.
+
+On a bare initial omp screen, the unstyled capture includes a right-aligned thinking-effort hint and the composer reads `unknown`.
+After an ordinary reply, the empty `❯` composer reads `empty`; typed input returns `unknown` and is refused rather than overwritten.
+No hint or unknown-state proof was relaxed to enable lifecycle control.
+Missing and finished hc terminals remain unprovable for control because the task record does not bind a core/socket identity.
+Herdr.app's installed guide and adoption implementation identify `herdr.tab` terminals as unnamed tabs; core names do not name those tabs, and no visual app proof is claimed.
+
+### Second mates
+
+Measured on 2026-11-02 with `hc 0.1.16` on macOS, inside a `bin/fm-hc-lab.sh` session only, while the operator's own `default` core stayed live and untouched.
+
+| Probe | Result |
+| --- | --- |
+| `hc ls` and `hc ls --label <k=v>` after `hc kill` of a labeled terminal | Listed live terminals only; the finished terminal appeared under `hc ls --all` and kept every label on `hc get` (`state: finished`, `reason: killed`) until `hc rm`, after which `hc get` exited 3. |
+| `hc run --name <name>` (0.1.16) | Accepted; `hc get` reported the name. |
+
+Refresh the second-mate proof with:
+
+```sh
+bin/fm-test-run.sh tests/fm-backend-hc-secondmate-smoke.test.sh
+```
+
+The guard runs a real `bin/fm-spawn.sh <id> <home> --secondmate --backend hc` with a token-free stand-in named for a verified adapter, reads the terminal's labels through the lab core, then drives `bin/fm-secondmate-liveness-lib.sh` through a dead agent, a finished terminal, and an alive mate, whose recovery respawns keep the mate on its recorded backend `hc`.
+Observed guard output:
+
+```text
+ok - hc secondmate smoke: a real --secondmate launch lands in the mate's own space with this home's identity and an alive agent
+ok - hc secondmate smoke: a dead mate is closed, removed, and respawned in the same space at a new address
+ok - hc secondmate smoke: a finished terminal is removed as a husk before the mate is respawned
+ok - hc secondmate smoke: an alive mate is left exactly as it is
+FM_TEST_COMPLETE
+```
+
+The mate's terminal carried `herdr.space=fm-2ndmate-<id>-<hash of the mate home>`, `herdr.tab=<launching hometag>-fm-<id>`, and the launching home's `firstmate.*` labels; each respawn bound a fresh address with the same labels, and the dead and finished terminals answered not found afterwards.
+On this host the lab teardown's fleet-state tripwire refused, because the live `default` core rewrote its own `terminals.json` during the run; the same file changed between two passive reads taken with no lab activity at all, no lab process survived the sweep, and the retained lab directory was removed by hand.
+A host whose real core is idle, such as the `tests-hc` CI lane, keeps the tripwire intact.
+
+### Second mates with real omp agents
+
+Measured on 2026-11-06 on macOS with `hc 0.1.18`, `herdr 0.9.5`, and `omp/18.17.0`, in one `bin/fm-hc-lab.sh` core session, one `bin/fm-herdr-lab.sh` session, and a `bin/fm-lab-home.sh` primary home checked out from this branch.
+Second mate homes were seeded with `bin/fm-home-seed.sh <id> <path> --no-projects`, and every agent was a real omp session.
+
+| Scenario | Commands | Result |
+| --- | --- | --- |
+| Launch | `bin/fm-spawn.sh <id> --secondmate --backend hc` | `parent: null`, `herdr.space=fm-2ndmate-<id>-<hash>`, the launching home's `firstmate.*` labels, a task-derived core name, and agent state `alive`; the mate ran its own session start. |
+| Recovery | `bin/fm-bootstrap.sh` after killing the omp process, then after `hc kill` of the terminal, then once more | The dead terminal and the finished husk were each removed and the mate respawned at a new address with the same labels, on `backend=hc`; the alive mate's record stayed byte-identical; the sweep printed no `SECONDMATE_LIVENESS` line. |
+| Move | `bin/fm-secondmate-move.sh <id> --backend hc` on a mate launched with `--backend herdr` | `moved <id> from=herdr to=hc`; the Herdr pane read `missing` and the hc agent `alive` in the mate's own space. A same-backend target, a missing hc binary, and an hc reporting 0.1.14 each refused with the mate still alive and its record unchanged. An injected `hc run` failure after the stop left `backend=herdr` in the record, and the next sweep respawned the mate on Herdr. A record with `remote_host` refused before contacting the host. |
+| Steering | `bin/fm-send.sh <id> <text>` | The record landed in `state/<id>.inbox/`, the doorbell submitted in the hc terminal, and the mate ran the requested command, moved the record to `handled/`, and replied on its parent channel. |
+| Crew lifecycle | The mate ran `bin/fm-spawn.sh <task> <project> --backend hc` from its own terminal; then `bin/fm-control.sh <task> exit`, a repeated `exit`, and `relaunch --harness omp` from outside | The task terminal was the mate terminal's child in the mate's space with the mate home's labels; `exit` left a shell, the repeated `exit` printed `already-stopped`, and `relaunch` started a new omp process in the same terminal address with the same core name, branch head, and uncommitted edit. `bin/fm-control.sh <mate> exit` refused with `the hc backend does not support secondmate lifecycle control`. |
+| Primary | `omp` started in an hc terminal of the lab core with `FM_HOME` set to the lab home | The omp extension ran `bin/fm-session-start.sh` at session open and the session lock named the omp process; the extension armed the watcher, and a `blocked:` line appended to a lab task's status file reached the primary as a watcher wake 46 seconds later. `bin/fm-supervise-daemon.sh` run in an hc terminal exited 1 with `error: away-mode daemon does not support supervisor backend 'hc' yet`. |
+
+A process inside a lab core's terminal cannot discover the lab's pinned socket, because the adapter resolves the core from `HC_SESSION` and hc's default socket layout.
+The mate's first crew spawn without a pin failed with `error: 'hc server status' failed for session '<lab session>'`, so the crew spawn and the primary's launch named `FM_HC_SOCKET`.
+
 ### Not verified
 
-- A spawn with a real harness rather than the stand-in.
+- That Firstmate processes inside a terminal of the Herdr app's own core reach that core without `FM_HC_SOCKET`; the lab above could not exercise it.
+- How a second mate's space and tab display in a live Herdr.app window.
 - `send --wait`'s `started`/`working` proof against a real status-reporting harness; the lab run covered a non-reporting shell, whose verdict falls to the composer screen.
+- Conversational submit confirmation across harnesses beyond the exercised omp lifecycle path.
 - Native `status.state` reported by a real harness launched through `bin/fm-spawn.sh`.

@@ -47,6 +47,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-herdr-ci-cleanup.sh` | Snapshot and tear down only job-owned `fm-lab-*` sessions in the Herdr CI lane       |
 | `fm-hc-ci-cleanup.sh`    | Snapshot and tear down only job-owned `fm-hclab-*` sessions in the herdr-core CI lane |
 | `fm-rex-marks.sh`        | Opt-in: turn each Rex task's latest status into one badge and notification on its pane, plus validation progress and an optional tint (`plan`, `sync`, `clear`); the watcher runs `sync` each poll while the option or a cached record exists, and cleanup runs `clear` |
+| `fm-osc7501.sh`          | Launch-driven [OSC 7501 worker status bridge](configuration.md#osc-7501-worker-status-reporting); its header owns commands and reporting rules |
 | `fm-test-run.sh`         | Behavior-test runner: selection, portable lanes, bounded concurrency, budgets, coverage guard, timing/JSON; refuses to execute in the repository primary checkout when `FM_TASK_ID` marks a task worker |
 | `fm-test-isolation-proof.sh` | Concurrent isolation harness and portable candidate set owner |
 | `fm-ensure-agents-md.sh` | Manually initialize project agent-memory files (see the helper's header and help) |
@@ -109,6 +110,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-codex-stop-park.sh`  | On an opted-in home, register verified native Codex sessions and park supervision in the asynchronous Stop hook, delivering wakes through the native thread queue |
 | `fm-watch-checkpoint.sh` | Run one bounded foreground watcher checkpoint for Codex-style supervision            |
 | `fm-watch.sh`            | Singleton-safe watcher: absorb benign wakes, detect stalled local-secondmate wake queues, and exit on actionable ones |
+| `fm-watch-key-lib.sh`    | Shared per-window watcher marker identity for the watcher and away daemon             |
 | `fm-inactive-reconcile.sh` | Reconcile long-inactive direct crewmate terminal outcomes without forge access |
 | `fm-afk-contract.sh`     | Own the away-or-quiet record's posture, schema, entry, read-back, archive, and cross-subsystem authority lock |
 | `fm-afk-start.sh`        | Run the common sourceable away-mode daemon entry in the foreground                      |
