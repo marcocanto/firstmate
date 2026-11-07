@@ -127,6 +127,13 @@ move_cleanup() {
   [ -z "$SNAPSHOT" ] || rm -f "$SNAPSHOT"
   # An exit during a conversion that did not go through cv_fail still puts
   # the previous local route back (cv_restore is a no-op once settled).
+  # One interrupted after the remote launch published a record is kept, as
+  # the launch failure path keeps it.
+  if [ "${CV_ACTIVE:-0}" = 1 ] && [ "${CV_LAUNCHING:-0}" = 1 ] && cv_launch_landed; then
+    CV_ACTIVE=0
+    CV_KEEP=1
+    echo "error: second mate $ID may already run on $CONVERT_HOST, but the conversion was interrupted during its launch; its remote route is kept, so run 'bin/fm-spawn.sh $ID --secondmate' to finish recording it; the previous local record and the conversion's snapshots are at $CV_META_ASIDE and $CV_STAGE" >&2
+  fi
   [ "${CV_ACTIVE:-0}" != 1 ] || cv_restore
   if [ -n "${CV_STAGE:-}" ] && [ "${CV_KEEP:-0}" != 1 ] && [ -z "${CV_RESTORE_NOTES:-}" ]; then
     rm -rf -- "$CV_STAGE"
@@ -277,10 +284,17 @@ CV_STATUS_DONE=0
 CV_BINDING_DONE=0
 CV_ADOPT_DONE=0
 CV_REGISTRY_DONE=0
+CV_LAUNCHING=0
 CV_RESTORE_NOTES=
 
 cv_note() {  # <text>: one restore step that could not be completed
   CV_RESTORE_NOTES="${CV_RESTORE_NOTES}${CV_RESTORE_NOTES:+; }$1"
+}
+
+# cv_launch_landed: the remote launch has published a record, on the parent or
+# in the home, so undoing the conversion would put a second agent beside it.
+cv_launch_landed() {
+  [ -f "$META" ] || [ -f "$CV_HOME/state/parent-route/$ID.meta" ]
 }
 
 # cv_restore: undo every applied conversion step, newest first, leaving the
@@ -588,20 +602,15 @@ remote_convert() {
     && mv -f "$home/data/charter.md.convert.$$" "$home/data/charter.md"; } \
     || cv_fail "second mate $ID's charter could not be rewritten"
 
-  # The binding switches first, so every parent-channel append from here on
-  # resolves to the relay log (bin/fm-parent-channel-lib.sh).
-  cp -p "$home/.fm-secondmate-parent" "$CV_STAGE/parent.before" || cv_fail "second mate $ID's parent record could not be snapshotted"
-  CV_BINDING_DONE=1
-  fm_secondmate_parent_record_write_remote "$home/.fm-secondmate-parent" "$CONVERT_HOST" \
-    || cv_fail "second mate $ID's parent record could not be rewritten"
-
   # The old parent stream becomes the head of the new relay log, so the home's
   # outcome publishers still see every line they already delivered, and the
-  # mirror starts after it (adopt) instead of delivering it again. A line a
-  # publisher appended to the relay log after the switch stays after that head
-  # and is mirrored once; one appended to the old stream after the snapshot is
-  # carried after the head too, and the mirror skips it because the parent
-  # stream already holds it.
+  # mirror starts after it (adopt) instead of delivering it again. The relay
+  # log is published while the binding is still local, so nothing appends to
+  # it while it is replaced; once the binding switches, every parent-channel
+  # append resolves to it (bin/fm-parent-channel-lib.sh) and lands after that
+  # head, to be mirrored once. A line appended to the old stream after the
+  # snapshot is carried after the head too, and the mirror skips it because
+  # the parent stream already holds it.
   if [ -f "$STATE/$ID.status" ]; then
     cp "$STATE/$ID.status" "$CV_STAGE/status.prefix" || cv_fail "second mate $ID's status stream could not be read"
   else
@@ -614,6 +623,11 @@ remote_convert() {
   { cp "$CV_STAGE/relay.next" "$home/state/parent-replies.status.convert.$$" \
     && mv -f "$home/state/parent-replies.status.convert.$$" "$home/state/parent-replies.status"; } \
     || cv_fail "second mate $ID's relay log could not be written"
+
+  cp -p "$home/.fm-secondmate-parent" "$CV_STAGE/parent.before" || cv_fail "second mate $ID's parent record could not be snapshotted"
+  CV_BINDING_DONE=1
+  fm_secondmate_parent_record_write_remote "$home/.fm-secondmate-parent" "$CONVERT_HOST" \
+    || cv_fail "second mate $ID's parent record could not be rewritten"
   if [ -f "$STATE/$ID.status" ] && ! cmp -s "$STATE/$ID.status" "$CV_STAGE/status.prefix"; then
     tail -c "+$(( $(LC_ALL=C wc -c < "$CV_STAGE/status.prefix") + 1 ))" "$STATE/$ID.status" \
       >> "$home/state/parent-replies.status" || cv_fail "second mate $ID's late status lines could not be carried"
@@ -646,6 +660,7 @@ remote_convert() {
   fm_lock_acquire_wait_bounded "$relaunch_lock" 600 || cv_fail "another second-mate relaunch still holds the relaunch lock"
   fm_secondmate_liveness_ledger_add "$ID" attempt || true
   spawn_rc=0
+  CV_LAUNCHING=1
   out=$(FM_SPAWN_NO_GUARD=1 "$SCRIPT_DIR/fm-spawn.sh" "${spawn_args[@]}" 2>&1) || spawn_rc=$?
   if [ "$spawn_rc" -eq 0 ]; then
     fm_secondmate_liveness_ledger_add "$ID" relaunched || true
@@ -661,7 +676,7 @@ remote_convert() {
   # A launch the host completed, or may have completed, is never undone from
   # here: restoring the local route would put a second agent beside the remote
   # one.
-  if [ "$spawn_rc" -eq 255 ] || [ -f "$META" ] || [ -f "$home/state/parent-route/$ID.meta" ]; then
+  if [ "$spawn_rc" -eq 255 ] || cv_launch_landed; then
     CV_ACTIVE=0
     CV_KEEP=1
     die "second mate $ID may already run on $CONVERT_HOST, but its launch did not finish cleanly ($(first_line "$out")); its remote route is kept, so run 'bin/fm-spawn.sh $ID --secondmate' to finish recording it; the previous local record and the conversion's snapshots are at $CV_META_ASIDE and $CV_STAGE"
