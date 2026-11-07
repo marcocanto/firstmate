@@ -16,7 +16,9 @@ FM_TEST_CLEANUP_DIRS+=("/tmp/fm-$CONTROL_ID")
 # The stub answers `get` from <dir>/<address>.json (exit from <address>.exit,
 # 3 = not_found when no file exists), `ls` from <dir>/ls.json, `run` with
 # <dir>/run.json, and removes <address>.json on `rm` unless <dir>/rm-sticks
-# exists. Every call is logged with its HC_SESSION and HC_SOCKET.
+# exists. `send` refuses with the exit in <dir>/send.exit; like hc, a blocked
+# refusal (9) yields to --force. Every call is logged with its HC_SESSION and
+# HC_SOCKET.
 make_hc_fakebin() {  # <dir> -> echoes fakebin dir
   local fb="$1/fakebin"
   mkdir -p "$fb"
@@ -52,7 +54,9 @@ case "$cmd" in
     if [ -f "$D/screen" ]; then cat "$D/screen"; else printf 'screen of %s\n' "$last"; fi
     ;;
   send)
-    if [ -f "$D/send.exit" ]; then
+    forced=0
+    for a in "$@"; do [ "$a" != --force ] || forced=1; done
+    if [ -f "$D/send.exit" ] && { [ "$(cat "$D/send.exit")" != 9 ] || [ "$forced" = 0 ]; }; then
       printf '{"error":{"kind":"%s"}}\n' "$(cat "$D/send.kind" 2>/dev/null || echo blocked)" >&2
       exit "$(cat "$D/send.exit")"
     fi
@@ -373,7 +377,55 @@ test_send_text_submit_confirms_through_send_wait() {
   printf '{"started":null,"wait":{"status":"idle","timed_out":true}}\n' > "$D/send.json"
   out=$(hc_shell 'fm_backend_hc_send_text_submit fmtest:t1 "deploy now" 3 0.4 0 fm-a1')
   assert_equals "$out" unknown "a silent program falls back to the composer screen, which cannot prove empty on a plain pane"
-  pass "hc: send_text_submit proves the turn through send --wait and never forces a blocked terminal"
+  pass "hc: send_text_submit proves the turn through send --wait and never forces an unproven blocked terminal"
+}
+
+# fm-osc7501.sh publishes a worker's open needs-decision or blocked line as an
+# hc blocked status, and hc then refuses every `hc send`. The worker itself
+# sits at an empty composer, so Firstmate must still reach it, while a real
+# dialog, held text, or the program's own blocked report keeps hc's refusal.
+test_send_reaches_a_worker_behind_firstmates_own_blocked_status() {
+  local tag out rule kind
+  setup_case blockedstatus
+  tag=$(hometag_of)
+  write_terminal "$D" t1 live fm-a1 "$tag" omp omp
+  rule=$(printf '─%.0s' $(seq 80))
+  printf '9\n' > "$D/send.exit"
+  printf 'blocked\n' > "$D/send.kind"
+  for kind in permission question; do
+    jq --arg k "$kind" '.status = {state: "blocked", kind: $k, app: "firstmate-omp", title: "fm-a1"}' \
+      "$D/t1.json" > "$D/t1.new" && mv "$D/t1.new" "$D/t1.json"
+    printf 'earlier output\n\n%s\n❯ \n%s\n INSERT · model · work\n' "$rule" "$rule" > "$D/screen"
+    : > "$D/log"
+    : > "$D/sent"
+    out=$(hc_shell 'fm_backend_hc_send_text_submit fmtest:t1 "doorbell" 3 0.4 0 fm-a1')
+    assert_equals "$out" empty "Firstmate's own blocked ($kind) status over an empty composer must still take the doorbell"
+    assert_equals "$(cat "$D/sent")" doorbell "the doorbell must be typed exactly once"
+    assert_contains "$(grep $'\x1fsend\x1f' "$D/log")" $'\x1f--force\x1f' "the delivered send must be the forced one"
+  done
+
+  # Each case below must leave hc's refusal standing: no --force, nothing typed.
+  refused_unforced() {  # <why>
+    : > "$D/log"
+    : > "$D/sent"
+    out=$(hc_shell 'fm_backend_hc_send_text_submit fmtest:t1 "doorbell" 3 0.4 0 fm-a1' 2>/dev/null)
+    assert_equals "$out" unknown "$1 must stay refused"
+    case "$(cat "$D/log")" in *$'\x1f--force\x1f'*) fail "$1 must never be forced" ;; esac
+    assert_equals "$(cat "$D/sent")" "" "$1 must receive no text"
+  }
+  printf 'earlier output\n\n%s\n❯ half-typed note\n%s\n INSERT · model · work\n' "$rule" "$rule" > "$D/screen"
+  refused_unforced "a composer holding text"
+  printf 'Background work is running\n\n ❯ 1. Exit and stop tasks\n   2. Keep running\n\nEnter to confirm · Esc to cancel\n' > "$D/screen"
+  refused_unforced "a recognized dialog"
+  printf 'earlier output\n\n%s\n❯ \n%s\n INSERT · model · work\n' "$rule" "$rule" > "$D/screen"
+  touch "$D/read-fails"
+  refused_unforced "an unreadable screen"
+  rm -f "$D/read-fails"
+  jq '.status = {state: "blocked", kind: "permission", app: "omp"}' "$D/t1.json" > "$D/t1.new" && mv "$D/t1.new" "$D/t1.json"
+  refused_unforced "the program's own blocked report"
+  jq '.status = {state: "working", app: "firstmate-omp"}' "$D/t1.json" > "$D/t1.new" && mv "$D/t1.new" "$D/t1.json"
+  refused_unforced "a refusal while the record no longer reads blocked"
+  pass "hc: Firstmate's own blocked status over an empty composer still takes a send; a real dialog, held text, or a program's block does not"
 }
 
 test_send_delimiters_and_binary_socket_pins() {
@@ -755,6 +807,7 @@ fm_test_run \
   test_endpoint_validation_binds_hc_meta \
   test_container_ensure_gates_binary_version_and_generation \
   test_send_text_submit_confirms_through_send_wait \
+  test_send_reaches_a_worker_behind_firstmates_own_blocked_status \
   test_send_delimiters_and_binary_socket_pins \
   test_control_exit_proves_stop_and_is_idempotent \
   test_control_exit_preserves_all_refusals \
