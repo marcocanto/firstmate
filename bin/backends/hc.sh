@@ -392,17 +392,10 @@ fm_backend_hc_send_key() {  # <target> <key> [expected-label]
 }
 
 # fm_backend_hc_send_text_line: paste one line and submit it (`hc send`). The
-# `--` delimiter keeps flag-looking text from being parsed as options. A
-# blocked refusal (exit 9) is retried with --force only when
-# fm_backend_hc_blocked_send_proven proves the block is Firstmate's own record
-# over an empty composer.
+# `--` delimiter keeps flag-looking text from being parsed as options.
 fm_backend_hc_send_text_line() {  # <target> <text> [expected-label]
-  local rc=0
   fm_backend_hc_target_ready "$1" "${3:-}" || return 1
-  fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json "$FM_BACKEND_HC_ADDRESS" -- "$2" >/dev/null 2>&1 || rc=$?
-  [ "$rc" -eq 9 ] || return "$rc"
-  fm_backend_hc_blocked_send_proven "$1" "${3:-}" || return "$rc"
-  fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json --force "$FM_BACKEND_HC_ADDRESS" -- "$2" >/dev/null 2>&1
+  fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" send --json "$FM_BACKEND_HC_ADDRESS" -- "$2" >/dev/null 2>&1
 }
 
 fm_backend_hc_current_path() {  # <target> [expected-label]

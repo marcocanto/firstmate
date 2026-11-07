@@ -403,10 +403,6 @@ test_send_reaches_a_worker_behind_firstmates_own_blocked_status() {
     assert_equals "$(cat "$D/sent")" doorbell "the doorbell must be typed exactly once"
     assert_contains "$(grep $'\x1fsend\x1f' "$D/log")" $'\x1f--force\x1f' "the delivered send must be the forced one"
   done
-  : > "$D/sent"
-  hc_shell 'fm_backend_hc_send_text_line fmtest:t1 "next line" fm-a1' \
-    || fail "send_text_line must reach an empty composer behind Firstmate's own blocked status"
-  assert_equals "$(cat "$D/sent")" "next line" "send_text_line must type its line once"
 
   # Each case below must leave hc's refusal standing: no --force, nothing typed.
   refused_unforced() {  # <why>
@@ -414,7 +410,6 @@ test_send_reaches_a_worker_behind_firstmates_own_blocked_status() {
     : > "$D/sent"
     out=$(hc_shell 'fm_backend_hc_send_text_submit fmtest:t1 "doorbell" 3 0.4 0 fm-a1' 2>/dev/null)
     assert_equals "$out" unknown "$1 must stay refused"
-    expect_refused hc_shell 'fm_backend_hc_send_text_line fmtest:t1 "doorbell" fm-a1'
     case "$(cat "$D/log")" in *$'\x1f--force\x1f'*) fail "$1 must never be forced" ;; esac
     assert_equals "$(cat "$D/sent")" "" "$1 must receive no text"
   }
