@@ -464,15 +464,21 @@ moved_meta_path() { printf '%s/.%s.meta.moved\n' "$CONTROL_STATE" "$1"; }
 # its record is set aside so the parent's launch on the target backend starts
 # from no record instead of being refused as an unmigrated endpoint. A live
 # agent is refused: stopping it is the parent's proven `control <id> exit`.
+# A host with no endpoint record has nothing to close, so the release succeeds
+# without setting anything aside.
 cmd_move_release() {
   local id=$1 from=$2 meta moved meta_lock current
   validate_id "$id"
   validate_home "$id"
   meta=$(meta_path "$id")
   moved=$(moved_meta_path "$id")
-  [ -f "$meta" ] && [ ! -L "$meta" ] || die "remote secondmate $id has no endpoint record to move"
   [ ! -e "$moved" ] && [ ! -L "$moved" ] \
     || die "an earlier move of $id left its set-aside record at $moved; settle it with move-settle before moving again"
+  [ ! -L "$meta" ] || die "remote secondmate $id endpoint record is a symlink; nothing was released"
+  if [ ! -e "$meta" ]; then
+    printf 'released %s from=%s (no endpoint record on this host)\n' "$id" "$from"
+    return 0
+  fi
   meta_lock=$(fm_meta_lock_path "$meta") || die "remote secondmate metadata lock path is invalid"
   fm_task_inbox_lock_acquire "$meta_lock" || die "remote secondmate endpoint metadata could not be locked for the move"
   if ! remote_endpoint_load "$id"; then
@@ -515,7 +521,11 @@ cmd_move_settle() {
       printf 'dropped %s\n' "$id"
       ;;
     restore)
-      [ -f "$moved" ] && [ ! -L "$moved" ] || die "remote secondmate $id has no set-aside record to restore"
+      if [ ! -e "$moved" ] && [ ! -L "$moved" ]; then
+        printf 'nothing set aside for %s\n' "$id"
+        return 0
+      fi
+      [ -f "$moved" ] && [ ! -L "$moved" ] || die "remote secondmate $id set-aside record is not a regular file; nothing was restored"
       meta_lock=$(fm_meta_lock_path "$meta") || die "remote secondmate metadata lock path is invalid"
       fm_task_inbox_lock_acquire "$meta_lock" || die "remote secondmate endpoint metadata could not be locked for the restore"
       if [ -e "$meta" ] || [ -L "$meta" ]; then

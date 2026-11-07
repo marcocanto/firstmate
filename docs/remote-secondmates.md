@@ -780,6 +780,7 @@ These refusals all happen before anything is stopped, and leave the mate running
 
 Then the move stops a live agent on the host with `control <id> exit` and proves the endpoint agent-free.
 The host's `move-release` verb closes that endpoint and sets its record aside, and the primary relaunches the mate with `--backend hc`.
+A host that holds no endpoint record for the mate has nothing to close, so the release succeeds and sets nothing aside.
 On success, `move-settle drop` discards the set-aside record and the move prints `moved <id> from=<backend> to=hc host=<host>`.
 If the launch fails, `move-settle restore` puts the host's previous record back and the primary keeps its previous route record, so the next liveness recovery respawns the mate on its old backend.
 The [`bin/fm-secondmate-move.sh`](../bin/fm-secondmate-move.sh) header owns the sequence, and [`bin/fm-remote-secondmate-control.sh`](../bin/fm-remote-secondmate-control.sh) owns the host verbs.

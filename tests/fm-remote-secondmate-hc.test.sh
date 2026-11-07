@@ -214,6 +214,16 @@ if ctl move-settle "$ID" restore > "$TMP_ROOT/settle-newer.out" 2>&1; then
 fi
 assert_grep 'already has a newer endpoint record' "$TMP_ROOT/settle-newer.out" "a blocked restore was not explained"
 ctl move-settle "$ID" drop >/dev/null || fail "drop failed"
+# A host that holds no endpoint record (a route never launched there, or one
+# whose record was lost) has nothing to close: the release succeeds and a
+# later restore has nothing to put back.
+rm -f "$META"
+ctl move-release "$ID" herdr > "$TMP_ROOT/release-none.out" 2>&1 \
+  || fail "a release with no host record failed: $(cat "$TMP_ROOT/release-none.out")"
+assert_grep 'no endpoint record on this host' "$TMP_ROOT/release-none.out" "a recordless release did not say so"
+ctl move-settle "$ID" restore > "$TMP_ROOT/settle-none.out" 2>&1 \
+  || fail "a restore with nothing set aside failed: $(cat "$TMP_ROOT/settle-none.out")"
+assert_absent "$META" "a restore with nothing set aside created a record"
 pass "move-release frees only an agent-free endpoint, and settle restores or drops it"
 
 # --- host lifecycle control: exit and relaunch of an hc second mate ----------
