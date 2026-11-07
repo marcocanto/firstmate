@@ -1904,6 +1904,7 @@ test_teardown_removes_poll_artifacts() {
   printf 'registration\n' > "$dir/home/state/task-a.pr-poll-registration"
   printf 'trust\n' > "$dir/home/state/task-a.check-trust"
   printf 'https://github.com/o/r/pull/9\n' > "$dir/home/state/task-a.pr-register-refused"
+  fm_pr_queued_record "$dir/home/state" task-a github github.com o/r 9 || fail "could not record the queueing"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -1919,6 +1920,7 @@ SH
   [ ! -e "$dir/home/state/task-a.pr-poll-registration" ] || fail "teardown left the PR poll registration"
   [ ! -e "$dir/home/state/task-a.check-trust" ] || fail "teardown left the custom check registration"
   [ ! -e "$dir/home/state/task-a.pr-register-refused" ] || fail "teardown left the PR registration refusal marker"
+  [ ! -e "$dir/home/state/task-a.pr-queued" ] || fail "teardown left the merge queue record"
 
   dir=$(make_case teardown-retirement-receipt)
   fakebin="$dir/fakebin"
