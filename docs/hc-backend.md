@@ -133,6 +133,7 @@ A terminal already gone is simply respawned, and an alive mate is never touched.
 The respawn is `bin/fm-spawn.sh <id> --secondmate` on the mate's recorded backend, so a local hc second mate stays on hc whatever `config/backend` says.
 [`bin/fm-secondmate-move.sh`](../bin/fm-secondmate-move.sh) `<id> --backend hc` moves an existing local mate from another local backend onto hc while keeping its home, records, and backlog, and recovery then keeps it on hc because the record names hc; its header owns the sequence and its refusals.
 A remote second mate moves onto its own host's hc core instead, as [Move a remote second mate onto hc](remote-secondmates.md#move-a-remote-second-mate-onto-hc) describes.
+A local hc second mate becomes a remote route on the same machine's core, keeping its home in place, as [Convert a local second mate to a remote route](remote-secondmates.md#convert-a-local-second-mate-to-a-remote-route) describes.
 Lifecycle control of an hc second mate (`bin/fm-control.sh <id> interrupt`, `exit`, and `relaunch`) uses the same control plane, postconditions, and refusals as a ship or scout task on hc.
 A `relaunch` keeps the mate's terminal and launches the replacement with the same Firstmate launch wiring a fresh spawn uses, including omp's `--config`.
 
