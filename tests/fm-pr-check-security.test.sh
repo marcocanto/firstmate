@@ -142,6 +142,30 @@ printf 'host=%s\n' "${GH_HOST:-}" >> "$FM_TEST_GH_LOG"
 printf '%s\n' "$*" >> "$FM_TEST_GH_LOG"
 case "${1:-} ${2:-}" in
   "api graphql")
+    case "$*" in
+      *timelineItems*)
+        # Answers in GitHub's GraphQL response shape and applies the caller's
+        # own --jq filter with the real jq, as gh does.
+        [ "${FM_TEST_GH_QUEUE_READ_FAIL:-0}" = 0 ] || exit 1
+        filter=
+        while [ "$#" -gt 0 ]; do
+          [ "$1" != --jq ] || { filter=$2; break; }
+          shift
+        done
+        [ -n "$filter" ] || exit 1
+        removed_at=${FM_TEST_GH_QUEUE_REMOVED_AT-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        jq -n -r \
+          --arg state "${FM_TEST_GH_QUEUE_STATE:-OPEN}" \
+          --argjson queued "${FM_TEST_GH_QUEUE_QUEUED:-false}" \
+          --arg removed_at "$removed_at" \
+          --arg reason "${FM_TEST_GH_QUEUE_REASON:-}" \
+          '{data: {repository: {pullRequest: {state: $state, isInMergeQueue: $queued,
+            timelineItems: {nodes: (if $removed_at == "" then []
+              else [{createdAt: $removed_at, reason: (if $reason == "" then null else $reason end)}] end)}}}}}' \
+          | jq -r "$filter"
+        exit
+        ;;
+    esac
     printf '%s\n' \
       "state=${FM_TEST_GH_GRAPHQL_STATE:-MERGED}" \
       "merged=${FM_TEST_GH_GRAPHQL_MERGED:-true}" \
@@ -1894,6 +1918,7 @@ test_teardown_removes_poll_artifacts() {
   printf 'registration\n' > "$dir/home/state/task-a.pr-poll-registration"
   printf 'trust\n' > "$dir/home/state/task-a.check-trust"
   printf 'https://github.com/o/r/pull/9\n' > "$dir/home/state/task-a.pr-register-refused"
+  fm_pr_queued_record "$dir/home/state" task-a github github.com o/r 9 "$(date +%s)" || fail "could not record the queueing"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -1909,6 +1934,7 @@ SH
   [ ! -e "$dir/home/state/task-a.pr-poll-registration" ] || fail "teardown left the PR poll registration"
   [ ! -e "$dir/home/state/task-a.check-trust" ] || fail "teardown left the custom check registration"
   [ ! -e "$dir/home/state/task-a.pr-register-refused" ] || fail "teardown left the PR registration refusal marker"
+  [ ! -e "$dir/home/state/task-a.pr-queued" ] || fail "teardown left the merge queue record"
 
   dir=$(make_case teardown-retirement-receipt)
   fakebin="$dir/fakebin"
@@ -2848,6 +2874,162 @@ test_merged_poll_retries_a_failed_upward_report() {
     "merged-poll-upward-retry: repaired binding did not receive the retry"
   assert_poll_absent "$state" task-a
   pass "a failed upward merge report keeps its poll armed for repair and retry"
+}
+
+# GitHub can take a queued pull request back out of the merge queue without
+# merging it. The poll reports that once per removal for a pull request this
+# home queued, and stays silent for every other reading.
+queued_poll_case() {  # <case-name> <url>
+  local dir state
+  dir=$(make_case "$1")
+  state="$dir/home/state"
+  write_poll_meta "$state" task-a "$2"
+  seed_canonical_poll "$dir" task-a "$2"
+  fm_pr_queued_record "$state" task-a github github.com o/r 1 "$(date +%s)" || fail "could not record the queueing"
+  ln -sf "$REAL_JQ" "$dir/fakebin/jq"
+  printf '%s\n' "$dir"
+}
+
+run_queued_poll() {  # <case-dir> <queued-epoch>
+  local dir=$1
+  FM_TEST_GH_LOG="$dir/gh.log" PATH="$dir/fakebin:$BASE_PATH" \
+    bash "$POLL" --validated github https://github.com/o/r/pull/1 github.com o/r 1 --queued "$2"
+}
+
+test_unqueued_poll_reads() {
+  local dir out epoch=1788575000
+  dir=$(queued_poll_case unqueued-poll-reads https://github.com/o/r/pull/1)
+
+  # 2026-09-05T02:23:20Z is epoch 1788575000.
+  export FM_TEST_GH_QUEUE_REMOVED_AT=2026-09-05T02:23:20Z
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=CI_FAILURE run_queued_poll "$dir" "$epoch")
+  [ "$out" = 'unqueued reason=CI_FAILURE' ] || fail "unqueued poll did not report the removal reason: $out"
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON='' run_queued_poll "$dir" "$epoch")
+  [ "$out" = unqueued ] || fail "unqueued poll without a reason printed: $out"
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON='bad reason;x' run_queued_poll "$dir" "$epoch")
+  [ "$out" = unqueued ] || fail "unqueued poll printed an unsafe reason: $out"
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=CI_FAILURE run_queued_poll "$dir" $((epoch + 1)))
+  [ -z "$out" ] || fail "a removal from before this queueing was reported: $out"
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REMOVED_AT='' run_queued_poll "$dir" "$epoch")
+  [ -z "$out" ] || fail "an open, unqueued pull request with no removal event was reported: $out"
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_QUEUED=true run_queued_poll "$dir" "$epoch")
+  [ -z "$out" ] || fail "a pull request still in the queue was reported: $out"
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_READ_FAIL=1 run_queued_poll "$dir" "$epoch")
+  [ -z "$out" ] || fail "a queue read error was reported: $out"
+  out=$(FM_TEST_GH_STATE=CLOSED run_queued_poll "$dir" "$epoch")
+  [ -z "$out" ] || fail "a closed pull request was reported as unqueued: $out"
+  out=$(FM_TEST_GH_STATE=MERGED run_queued_poll "$dir" "$epoch")
+  [ "$out" = merged ] || fail "a merged queued pull request did not print merged: $out"
+  out=$(FM_TEST_GH_STATE=OPEN run_poll "$dir")
+  [ -z "$out" ] || fail "a direct run reported a removal: $out"
+  unset FM_TEST_GH_QUEUE_REMOVED_AT
+  pass "the poll reports only an open, unqueued pull request removed after its recorded queueing"
+}
+
+test_unqueued_removal_wakes_once_per_removal() {
+  local dir state rc url=https://github.com/o/r/pull/1
+  dir=$(queued_poll_case unqueued-wake-once "$url")
+  state="$dir/home/state"
+  add_stop_custom_check "$dir"
+
+  set +e
+  FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=MERGE_CONFLICT \
+    run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch-1.out" 2> "$dir/watch-1.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "unqueued watcher cycle failed: $(cat "$dir/watch-1.err")"
+  case "$(cat "$dir/watch-1.out")" in
+    check:*task-a.check.sh:*unqueued\ reason=MERGE_CONFLICT) ;;
+    *) fail "removal did not wake the watcher: $(cat "$dir/watch-1.out")" ;;
+  esac
+  assert_grep "check: left the merge queue without merging: task-a $url reason=MERGE_CONFLICT" "$state/.wake-queue" \
+    "unqueued removal left no durable wake"
+  [ ! -e "$state/task-a.pr-queued" ] || fail "reported removal kept its queue record"
+  [ -f "$state/task-a.check.sh" ] || fail "removal retired the merge poll, which must keep watching"
+  ack_watcher_cycle "$state" || fail "unqueued wake acknowledgement failed"
+
+  rm -f "$state/.last-check"
+  set +e
+  FM_TEST_GH_STATE=OPEN run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch-2.out" 2> "$dir/watch-2.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "second cycle failed: $(cat "$dir/watch-2.err")"
+  case "$(cat "$dir/watch-2.out")" in
+    check:*z-stop.check.sh:*stop-cycle) ;;
+    *) fail "the same removal was reported twice: $(cat "$dir/watch-2.out")" ;;
+  esac
+  ack_watcher_cycle "$state" || fail "control cycle acknowledgement failed"
+
+  # Queued again, removed again: a second report. Then a merge still reports.
+  sleep 1
+  fm_pr_queued_record "$state" task-a github github.com o/r 1 "$(date +%s)" || fail "could not record the second queueing"
+  rm -f "$state/.last-check"
+  set +e
+  FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=CI_FAILURE \
+    run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch-3.out" 2> "$dir/watch-3.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "third cycle failed: $(cat "$dir/watch-3.err")"
+  case "$(cat "$dir/watch-3.out")" in
+    check:*task-a.check.sh:*unqueued\ reason=CI_FAILURE) ;;
+    *) fail "a second removal was not reported: $(cat "$dir/watch-3.out")" ;;
+  esac
+  ack_watcher_cycle "$state" || fail "second unqueued wake acknowledgement failed"
+
+  fm_pr_queued_record "$state" task-a github github.com o/r 1 "$(date +%s)" || fail "could not record the third queueing"
+  rm -f "$state/.last-check"
+  set +e
+  FM_TEST_GH_STATE=MERGED run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch-4.out" 2> "$dir/watch-4.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "merged cycle failed: $(cat "$dir/watch-4.err")"
+  case "$(cat "$dir/watch-4.out")" in
+    check:*task-a.check.sh:*merged) ;;
+    *) fail "the merge after a removal was not reported: $(cat "$dir/watch-4.out")" ;;
+  esac
+  [ ! -e "$state/task-a.pr-queued" ] || fail "a merge left the queue record behind"
+  pass "a removal from the merge queue wakes once per removal and a later merge still reports"
+}
+
+test_unqueued_report_keeps_a_later_queueing() {
+  local dir state url=https://github.com/o/r/pull/1
+  dir=$(queued_poll_case unqueued-keeps-later "$url")
+  state="$dir/home/state"
+  fm_pr_queued_record "$state" task-a github github.com o/r 1 2000000000 || fail "could not record the later queueing"
+  bash -c '. "$1/bin/fm-merge-outcome-lib.sh" && fm_merge_unqueued_report "$2" "$3" task-a "$4" 1000000000 CI_FAILURE' \
+    _ "$ROOT" "$dir/home" "$state" "$url" || fail "the earlier removal could not be reported"
+  assert_grep "left the merge queue without merging: task-a $url reason=CI_FAILURE" "$state/.wake-queue" \
+    "the earlier removal left no durable wake"
+  fm_pr_queued_read "$state" task-a github github.com o/r 1 && [ "$FM_PR_QUEUED_EPOCH" = 2000000000 ] \
+    || fail "reporting an earlier removal consumed a later queueing's record"
+  bash -c '. "$1/bin/fm-merge-outcome-lib.sh" && fm_merge_unqueued_report "$2" "$3" task-a "$4" 2000000000' \
+    _ "$ROOT" "$dir/home" "$state" "$url" || fail "the later removal could not be reported"
+  [ ! -e "$state/task-a.pr-queued" ] || fail "reporting the recorded queueing's removal kept its record"
+  pass "a removal report consumes only the queueing it reports"
+}
+
+test_unqueued_removal_reaches_the_parent_of_a_secondmate_home() {
+  local dir state rc url=https://github.com/o/r/pull/1 replies
+  dir=$(queued_poll_case unqueued-upward "$url")
+  state="$dir/home/state"
+  replies="$state/parent-replies.status"
+  seed_secondmate_home "$dir"
+  add_stop_custom_check "$dir"
+
+  set +e
+  FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=CI_TIMEOUT \
+    run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch.out" 2> "$dir/watch.err"
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || fail "secondmate unqueued cycle failed: $(cat "$dir/watch.err")"
+  assert_grep "failed [key=unqueued-task-a-" <(sed -E 's/ \[at=[0-9]+\]//' "$replies") \
+    "removal did not reach the parent channel"
+  assert_grep "left the merge queue without merging: task-a $url reason=CI_TIMEOUT" "$replies" \
+    "parent line did not name the pull request and reason"
+  assert_grep "left the merge queue without merging: task-a" "$state/.wake-queue" \
+    "the mate's own home got no local wake"
+  [ ! -e "$state/task-a.pr-queued" ] || fail "reported removal kept its queue record"
+  pass "a second mate's queued pull request removal reaches its parent"
 }
 
 test_self_merge_and_poll_publish_one_outcome() {
@@ -4172,6 +4354,10 @@ test_watcher_sweep_records_a_reported_pr
 test_valid_recording_and_merge_derivation
 test_rejected_metacharacter_bytes_are_inert
 test_static_poll_contract
+test_unqueued_poll_reads
+test_unqueued_removal_wakes_once_per_removal
+test_unqueued_report_keeps_a_later_queueing
+test_unqueued_removal_reaches_the_parent_of_a_secondmate_home
 test_atomic_interruption_leaves_no_partial_artifact
 test_concurrent_watcher_sees_only_complete_publication
 test_poll_publication_refuses_unsafe_destinations

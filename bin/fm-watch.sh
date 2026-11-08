@@ -4028,8 +4028,18 @@ while :; do
             triage_log "PR poll for $id changed before its validated check; skipping the stale snapshot"
             continue
           fi
+          # A GitHub pull request this home queued is also watched for leaving
+          # the merge queue unmerged; the recorded queueing is validated here
+          # because the static poll sources nothing.
+          queued_epoch=
+          queued_args=()
+          if [ "$provider" = github ] \
+            && fm_pr_queued_read "$STATE" "$id" "$provider" "$host" "$path" "$number"; then
+            queued_epoch=$FM_PR_QUEUED_EPOCH
+            queued_args=(--queued "$queued_epoch")
+          fi
           run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated \
-            "$provider" "$url" "$host" "$path" "$number" || exit 1
+            "$provider" "$url" "$host" "$path" "$number" "${queued_args[@]+"${queued_args[@]}"}" || exit 1
           out=$FM_CHECK_RESULT
         elif fm_custom_check_snapshot_prepare "$STATE" "$id"; then
           custom_snapshot=$FM_CUSTOM_CHECK_SNAPSHOT
@@ -4105,6 +4115,24 @@ EOF
             continue
           fi
           wake "$reason"
+        fi
+        if [ "$is_pr_poll" -eq 1 ] && [ -n "$queued_epoch" ]; then
+          case "$out" in
+            unqueued|"unqueued reason="*)
+              unqueued_reason=${out#unqueued}
+              unqueued_reason=${unqueued_reason# reason=}
+              unqueued_rc=0
+              fm_merge_unqueued_report "$FM_HOME" "$STATE" "$id" "$url" "$queued_epoch" \
+                "$unqueued_reason" || unqueued_rc=$?
+              if [ "$unqueued_rc" -ne 0 ]; then
+                triage_log "merge queue removal for $id could not be recorded (rc=$unqueued_rc)"
+                exit 1
+              fi
+              pr_poll_control_release || exit 1
+              touch "$STATE/.last-check"
+              wake "$reason"
+              ;;
+          esac
         fi
         pr_poll_control_release || exit 1
         fm_wake_append check "$c" "$reason" || exit 1

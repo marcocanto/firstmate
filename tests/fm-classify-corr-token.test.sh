@@ -271,6 +271,8 @@ test_captain_relevance_and_pause_are_unchanged_without_a_token() {
   status_is_captain_relevant 'needs-decision [key=q1]: pick one' || fail "keyed needs-decision regressed"
   status_is_captain_relevant 'blocked: stuck' || fail "blocked: regressed"
   status_is_captain_relevant 'failed: gave up' || fail "failed: regressed"
+  status_is_captain_relevant 'failed [at=1788576000] [key=unqueued-task-a-1788575000]: left the merge queue without merging: task-a https://github.com/o/r/pull/1 reason=CI_FAILURE' \
+    || fail "a merge queue removal line was classified as progress"
   status_is_captain_relevant 'working: still going' && fail "working: regressed to captain-relevant"
   status_is_captain_relevant 'working: rebased onto merged #76' \
     && fail "nonterminal free-text guard regressed"

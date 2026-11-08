@@ -3,7 +3,16 @@
 # change poll sidecar.
 # It emits exactly one merged line for a merged change and stays silent
 # otherwise, including on every error, so a failed lookup can never be read as
-# a merge. The provider-tagged identity is data in the sidecar and is never
+# a merge.
+# A GitHub pull request that bin/fm-pr-merge.sh recorded as queued
+# (state/<id>.pr-queued) has one more outcome: when it is still open and no
+# longer in the merge queue, the poll emits one "unqueued" line, followed by
+# " reason=<reason>" when the latest removed_from_merge_queue timeline event
+# names one. Only a removal event created at or after the recorded queueing
+# epoch counts, so a pull request between leaving the queue and reading back as
+# merged, or an earlier queueing's removal, stays silent. The watcher validates
+# the record and passes its epoch as a trailing "--queued <epoch>", and consumes
+# the record when it reports the removal. The provider-tagged identity is data in the sidecar and is never
 # interpolated into this source: these bytes are identical for every task.
 # Each provider is read through its own standard CLI, gh for GitHub, glab for
 # GitLab, gerrit-axi for Gerrit, and tea for Forgejo, so an upstream checkout
@@ -14,12 +23,19 @@ set -u
 LC_ALL=C
 export LC_ALL
 
-if [ "$#" -eq 6 ] && [ "$1" = --validated ]; then
+queued_epoch=
+if { [ "$#" -eq 6 ] || { [ "$#" -eq 8 ] && [ "$7" = --queued ]; }; } && [ "$1" = --validated ]; then
   provider=$2
   url=$3
   host=$4
   path=$5
   number=$6
+  if [ "$#" -eq 8 ]; then
+    queued_epoch=$8
+    case "$queued_epoch" in
+      ''|*[!0-9]*) exit 0 ;;
+    esac
+  fi
 elif [ "$#" -eq 0 ]; then
   case "$0" in
     *.check.sh) data=${0%.check.sh}.pr-poll ;;
@@ -74,7 +90,43 @@ case "$provider" in
     esac
     [ "$url" = "https://$host/$owner/$repo/pull/$number" ] || exit 0
     state=$(GH_HOST=$host gh pr view "$url" --json state -q .state 2>/dev/null) || exit 0
-    [ "$state" = MERGED ] && printf '%s\n' merged
+    if [ "$state" = MERGED ]; then
+      printf '%s\n' merged
+    elif [ "$state" = OPEN ] && [ -n "$queued_epoch" ]; then
+      # One queue-aware read: the pull request's state, whether it is queued,
+      # and the latest removal's time in epoch seconds and reason, which is only
+      # ever printed after it passes the character filter below. Any read or
+      # shape error stays silent.
+      # shellcheck disable=SC2016  # GraphQL variables are literal query syntax.
+      fields=$(GH_HOST=$host gh api graphql \
+        -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){state isInMergeQueue timelineItems(last:1,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}' \
+        -F "owner=$owner" -F "repo=$repo" -F "number=$number" \
+        --jq '.data.repository.pullRequest | "state=" + (.state // ""), "queued=" + (.isInMergeQueue | tostring), (.timelineItems.nodes[0] // {} | "removed=" + (.createdAt // "" | if . == "" then "" else fromdateiso8601 | tostring end), "reason=" + (.reason // ""))' \
+        2>/dev/null) || exit 0
+      qstate=
+      qqueued=
+      qremoved=
+      qreason=
+      while IFS= read -r field; do
+        case "$field" in
+          state=*) qstate=${field#state=} ;;
+          queued=*) qqueued=${field#queued=} ;;
+          removed=*) qremoved=${field#removed=} ;;
+          reason=*) qreason=${field#reason=} ;;
+        esac
+      done <<FIELDS
+$fields
+FIELDS
+      case "$qremoved" in
+        ''|*[!0-9]*) exit 0 ;;
+      esac
+      if [ "$qstate" = OPEN ] && [ "$qqueued" = false ] && [ "$qremoved" -ge "$queued_epoch" ]; then
+        case "$qreason" in
+          ''|*[!A-Za-z0-9_]*) printf '%s\n' unqueued ;;
+          *) [ "${#qreason}" -le 64 ] && printf 'unqueued reason=%s\n' "$qreason" || printf '%s\n' unqueued ;;
+        esac
+      fi
+    fi
     ;;
   gitlab)
     [ "${#host}" -ge 1 ] && [ "${#host}" -le 253 ] || exit 0
