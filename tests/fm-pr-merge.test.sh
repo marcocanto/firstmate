@@ -1693,6 +1693,29 @@ test_github_queued_outcome_is_verified() {
   pass "fm-pr-merge accepts and accurately reports a GitHub merge-queue entry"
 }
 
+test_github_failed_merge_command_that_queued_is_recorded() {
+  local case_dir rc
+  case_dir=$(make_case github-failed-command-queued)
+  mkdir -p "$case_dir/wt"
+  add_gh_mocks_merge_fails "$case_dir"
+  write_github_outcome "$case_dir" OPEN false true master
+  : > "$case_dir/gh-axi.log"
+  : > "$case_dir/gh.log"
+
+  set +e
+  run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/55 --attended-override -- --auto --merge \
+    > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  [ "$rc" -ne 0 ] || fail "github-failed-command-queued: a failed merge command reported success"
+  assert_grep 'reads back as state=OPEN, merged=false, isInMergeQueue=true' "$case_dir/stderr" \
+    "github-failed-command-queued: the queued read-back was not reported"
+  [ -f "$case_dir/state/task-x1.pr-queued" ] \
+    || fail "github-failed-command-queued: a pull request this run queued was not recorded for the merge poll"
+  pass "fm-pr-merge records a queueing even when the merge command itself failed"
+}
+
 test_github_queue_required_refusal_names_retry_flags() {
   local case_dir rc
   case_dir=$(make_case github-queue-required)
@@ -3582,6 +3605,7 @@ test_github_without_gh_failed_read_keeps_bookkeeping
 test_github_merged_outcome_is_verified
 test_github_verified_merge_requires_poll_recording
 test_github_queued_outcome_is_verified
+test_github_failed_merge_command_that_queued_is_recorded
 test_github_queue_required_refusal_names_retry_flags
 test_extra_merge_args_forwarded
 test_missing_meta_refuses_before_merge

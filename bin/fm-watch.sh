@@ -4036,7 +4036,7 @@ while :; do
           if [ "$provider" = github ] \
             && fm_pr_queued_read "$STATE" "$id" "$provider" "$host" "$path" "$number"; then
             queued_epoch=$FM_PR_QUEUED_EPOCH
-            queued_args=(--queued)
+            queued_args=(--queued "$queued_epoch")
           fi
           run_check_capture "$SCRIPT_DIR/fm-pr-poll.sh" --validated \
             "$provider" "$url" "$host" "$path" "$number" "${queued_args[@]+"${queued_args[@]}"}" || exit 1

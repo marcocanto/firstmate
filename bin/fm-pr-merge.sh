@@ -1807,6 +1807,15 @@ github_report_queue_rules() {
   esac
 }
 
+# Records a queueing this run caused, so the merge poll can report GitHub taking
+# the pull request back out of the queue without merging it. The pull request is
+# queued either way, so a failed record is reported and not a failed merge.
+record_github_queueing() {
+  fm_pr_queued_record "$STATE" "$ID" "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
+    || printf 'actionable: %s is queued but the queueing could not be recorded, so a removal from the merge queue will not be reported\n' \
+      "$URL" >&2
+}
+
 github_report_unmerged_outcome() {
   printf 'error: GitHub merge outcome was not successful: state=%s, merged=%s, isInMergeQueue=%s\n' \
     "$FM_PR_GITHUB_STATE" "$FM_PR_GITHUB_MERGED" "$FM_PR_GITHUB_QUEUED" >&2
@@ -1959,6 +1968,7 @@ case "$PROVIDER" in
         else
           printf 'actionable: the merge command for %s failed, but the pull request reads back as state=%s, merged=%s, isInMergeQueue=%s\n' \
             "$URL" "$FM_PR_GITHUB_STATE" "$FM_PR_GITHUB_MERGED" "$FM_PR_GITHUB_QUEUED" >&2
+          [ "$FM_PR_GITHUB_MERGED" = true ] || record_github_queueing
         fi
       fi
       exit "$merge_status"
@@ -1973,12 +1983,7 @@ case "$PROVIDER" in
     elif [ "$FM_PR_GITHUB_QUEUED" = true ]; then
       printf 'verified: %s is queued (state=%s, merged=%s, isInMergeQueue=%s)\n' \
         "$URL" "$FM_PR_GITHUB_STATE" "$FM_PR_GITHUB_MERGED" "$FM_PR_GITHUB_QUEUED"
-      # Record the queueing so the merge poll can report GitHub taking the pull
-      # request back out of the queue without merging it. The pull request is
-      # queued either way, so a failed record is reported and not a failed merge.
-      fm_pr_queued_record "$STATE" "$ID" "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
-        || printf 'actionable: %s is queued but the queueing could not be recorded, so a removal from the merge queue will not be reported\n' \
-          "$URL" >&2
+      record_github_queueing
       exit 0
     else
       github_report_forge_output "$merge_output"

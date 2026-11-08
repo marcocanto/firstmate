@@ -144,12 +144,26 @@ case "${1:-} ${2:-}" in
   "api graphql")
     case "$*" in
       *timelineItems*)
+        # Answers in GitHub's GraphQL response shape and applies the caller's
+        # own --jq filter with the real jq, as gh does.
         [ "${FM_TEST_GH_QUEUE_READ_FAIL:-0}" = 0 ] || exit 1
-        printf '%s\n' \
-          "state=${FM_TEST_GH_QUEUE_STATE:-OPEN}" \
-          "queued=${FM_TEST_GH_QUEUE_QUEUED:-false}" \
-          "reason=${FM_TEST_GH_QUEUE_REASON:-}"
-        exit 0
+        filter=
+        while [ "$#" -gt 0 ]; do
+          [ "$1" != --jq ] || { filter=$2; break; }
+          shift
+        done
+        [ -n "$filter" ] || exit 1
+        removed_at=${FM_TEST_GH_QUEUE_REMOVED_AT-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        jq -n -r \
+          --arg state "${FM_TEST_GH_QUEUE_STATE:-OPEN}" \
+          --argjson queued "${FM_TEST_GH_QUEUE_QUEUED:-false}" \
+          --arg removed_at "$removed_at" \
+          --arg reason "${FM_TEST_GH_QUEUE_REASON:-}" \
+          '{data: {repository: {pullRequest: {state: $state, isInMergeQueue: $queued,
+            timelineItems: {nodes: (if $removed_at == "" then []
+              else [{createdAt: $removed_at, reason: (if $reason == "" then null else $reason end)}] end)}}}}}' \
+          | jq -r "$filter"
+        exit
         ;;
     esac
     printf '%s\n' \
@@ -2872,32 +2886,44 @@ queued_poll_case() {  # <case-name> <url>
   write_poll_meta "$state" task-a "$2"
   seed_canonical_poll "$dir" task-a "$2"
   fm_pr_queued_record "$state" task-a github github.com o/r 1 || fail "could not record the queueing"
+  ln -sf "$REAL_JQ" "$dir/fakebin/jq"
   printf '%s\n' "$dir"
 }
 
-test_unqueued_poll_reads() {
-  local dir state out
-  dir=$(queued_poll_case unqueued-poll-reads https://github.com/o/r/pull/1)
-  state="$dir/home/state"
+run_queued_poll() {  # <case-dir> <queued-epoch>
+  local dir=$1
+  FM_TEST_GH_LOG="$dir/gh.log" PATH="$dir/fakebin:$BASE_PATH" \
+    bash "$POLL" --validated github https://github.com/o/r/pull/1 github.com o/r 1 --queued "$2"
+}
 
-  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=CI_FAILURE run_poll "$dir")
+test_unqueued_poll_reads() {
+  local dir out epoch=1788575000
+  dir=$(queued_poll_case unqueued-poll-reads https://github.com/o/r/pull/1)
+
+  # 2026-09-05T02:23:20Z is epoch 1788575000.
+  export FM_TEST_GH_QUEUE_REMOVED_AT=2026-09-05T02:23:20Z
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=CI_FAILURE run_queued_poll "$dir" "$epoch")
   [ "$out" = 'unqueued reason=CI_FAILURE' ] || fail "unqueued poll did not report the removal reason: $out"
-  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON='' run_poll "$dir")
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON='' run_queued_poll "$dir" "$epoch")
   [ "$out" = unqueued ] || fail "unqueued poll without a reason printed: $out"
-  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON='bad reason;x' run_poll "$dir")
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON='bad reason;x' run_queued_poll "$dir" "$epoch")
   [ "$out" = unqueued ] || fail "unqueued poll printed an unsafe reason: $out"
-  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_QUEUED=true run_poll "$dir")
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=CI_FAILURE run_queued_poll "$dir" $((epoch + 1)))
+  [ -z "$out" ] || fail "a removal from before this queueing was reported: $out"
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REMOVED_AT='' run_queued_poll "$dir" "$epoch")
+  [ -z "$out" ] || fail "an open, unqueued pull request with no removal event was reported: $out"
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_QUEUED=true run_queued_poll "$dir" "$epoch")
   [ -z "$out" ] || fail "a pull request still in the queue was reported: $out"
-  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_READ_FAIL=1 run_poll "$dir")
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_READ_FAIL=1 run_queued_poll "$dir" "$epoch")
   [ -z "$out" ] || fail "a queue read error was reported: $out"
-  out=$(FM_TEST_GH_STATE=CLOSED run_poll "$dir")
+  out=$(FM_TEST_GH_STATE=CLOSED run_queued_poll "$dir" "$epoch")
   [ -z "$out" ] || fail "a closed pull request was reported as unqueued: $out"
-  out=$(FM_TEST_GH_STATE=MERGED run_poll "$dir")
+  out=$(FM_TEST_GH_STATE=MERGED run_queued_poll "$dir" "$epoch")
   [ "$out" = merged ] || fail "a merged queued pull request did not print merged: $out"
-  rm -f "$state/task-a.pr-queued"
   out=$(FM_TEST_GH_STATE=OPEN run_poll "$dir")
-  [ -z "$out" ] || fail "a pull request this home never queued was reported: $out"
-  pass "the poll reports only an open, unqueued pull request that was recorded as queued"
+  [ -z "$out" ] || fail "a direct run reported a removal: $out"
+  unset FM_TEST_GH_QUEUE_REMOVED_AT
+  pass "the poll reports only an open, unqueued pull request removed after its recorded queueing"
 }
 
 test_unqueued_removal_wakes_once_per_removal() {

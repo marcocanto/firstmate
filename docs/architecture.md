@@ -95,7 +95,7 @@ Each automatic relaunch surfaces as exactly one `check` wake plus a durable line
 `tests/fm-wake-queue.test.sh` pins the no-progress notification, drain-progress reset, declared-pause exclusion, active-turn deferral, proven-idle child-first ring, busy and unknown parent-alarm paths, genuine stall after a ring, idempotence, quiet-queue, and byte-for-byte foreign-row preservation guarantees.
 When a canonical validated task PR poll returns exactly `merged`, the watcher routes it through the shared merge-outcome emitter before retiring the poll.
 A GitHub pull request that `bin/fm-pr-merge.sh` put in the merge queue is recorded in `state/<id>.pr-queued`.
-For such a pull request the poll also returns `unqueued`, with ` reason=<reason>` when the latest `removed_from_merge_queue` timeline event names one, once it is open and no longer queued.
+For such a pull request the poll also returns `unqueued`, with ` reason=<reason>` when the event names one, once it is open, no longer queued, and its latest `removed_from_merge_queue` timeline event is no older than the recorded queueing.
 The watcher publishes that removal through `fm_merge_unqueued_report` on the same role-routed channel as a merge and consumes the record, so each removal reports once, a pull request queued and removed again reports again, and a later merge still returns `merged`.
 GitLab, Forgejo, and Gerrit polls are unchanged.
 A repository template update or a control relaunch leaves an armed poll valid, and the watcher runs the current repository poll with that validated registration rather than state-file code; [`bin/fm-pr-lib.sh`](../bin/fm-pr-lib.sh)'s header owns the authentication mechanics.
