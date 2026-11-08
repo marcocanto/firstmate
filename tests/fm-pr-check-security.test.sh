@@ -2882,7 +2882,7 @@ test_unqueued_poll_reads() {
 
   out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=CI_FAILURE run_poll "$dir")
   [ "$out" = 'unqueued reason=CI_FAILURE' ] || fail "unqueued poll did not report the removal reason: $out"
-  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON= run_poll "$dir")
+  out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON='' run_poll "$dir")
   [ "$out" = unqueued ] || fail "unqueued poll without a reason printed: $out"
   out=$(FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON='bad reason;x' run_poll "$dir")
   [ "$out" = unqueued ] || fail "unqueued poll printed an unsafe reason: $out"
