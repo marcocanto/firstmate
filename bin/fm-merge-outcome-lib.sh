@@ -125,7 +125,8 @@ fm_merge_outcome_report() {  # <home> <state> <task-id> <pr-url> <origin> [autho
 # fm_merge_unqueued_report <home> <state> <task-id> <pr-url> <queued-epoch> [reason]
 #
 # Publishes one removal from the merge queue, then consumes the task's queue
-# marker so the poll stays silent until the pull request is queued again. The
+# marker so the poll stays silent until the pull request is queued again. A
+# marker rewritten by a later queueing in the meantime is kept for that queueing. The
 # line is published before the marker is consumed, so an interrupted run
 # repeats the publication, which the parent channel's duplicate check absorbs.
 # <reason> is the poll's removal reason token and is optional.
@@ -133,11 +134,15 @@ fm_merge_outcome_report() {  # <home> <state> <task-id> <pr-url> <origin> [autho
 # home's role or parent binding cannot be read, and 1 on any other failure.
 fm_merge_unqueued_report() {  # <home> <state> <task-id> <pr-url> <queued-epoch> [reason]
   local home=$1 state=$2 id=$3 url=$4 epoch=$5 reason=${6-}
-  local self_rc=0 destination='' line note status=0 key
+  local self_rc=0 destination='' line note status=0 key provider host path number
   # shellcheck disable=SC2034 # Sourced wake helpers consume these scoped globals.
   local STATE FM_WAKE_QUEUE FM_WAKE_QUEUE_LOCK
   fm_pr_task_id_valid "$id" || return 2
   fm_pr_url_parse "$url" || return 2
+  provider=$FM_PR_PROVIDER
+  host=$FM_PR_HOST
+  path=$FM_PR_PATH
+  number=$FM_PR_NUMBER
   case "$epoch" in ''|*[!0-9]*) return 2 ;; esac
   case "$reason" in *[!A-Za-z0-9_]*) return 2 ;; esac
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
@@ -162,6 +167,10 @@ fm_merge_unqueued_report() {  # <home> <state> <task-id> <pr-url> <queued-epoch>
   if [ "$status" -eq 0 ]; then
     fm_wake_append check "$key" "check: $note" || status=1
   fi
-  [ "$status" -ne 0 ] || fm_pr_queued_remove "$state" "$id" || status=1
+  if [ "$status" -eq 0 ] \
+    && { ! fm_pr_queued_read "$state" "$id" "$provider" "$host" "$path" "$number" \
+      || [ "$FM_PR_QUEUED_EPOCH" = "$epoch" ]; }; then
+    fm_pr_queued_remove "$state" "$id" || status=1
+  fi
   return "$status"
 }

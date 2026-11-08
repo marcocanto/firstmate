@@ -1605,7 +1605,9 @@ fm_pr_poll_merge_notified_remove() {  # <state> <id>
 # after pr= and a rejected record silently stops merge monitoring.
 # The marker is consumed when the removal is reported, so a pull request that is
 # queued again and removed again reports again. The epoch of the queueing is the
-# removal's identity in the published line keys.
+# removal's identity in the published line keys, and only a removal GitHub
+# timestamps at or after it is reported, so the recorder passes a local time
+# taken before it asked to merge, less an allowance for clock skew.
 fm_pr_queued_marker_read() {  # <marker> <device> <provider> <host> <path> <number>
   local marker=$1 device=$2 expected_provider=$3 expected_host=$4 expected_path=$5 expected_number=$6
   local version provider host path number epoch
@@ -1641,14 +1643,14 @@ fm_pr_queued_read() {  # <state> <id> <provider> <host> <path> <number>
   fm_pr_queued_marker_read "$state/$id.pr-queued" "$state_device" "$3" "$4" "$5" "$6"
 }
 
-fm_pr_queued_record() {  # <state> <id> <provider> <host> <path> <number>
-  local state=$1 id=$2 provider=$3 host=$4 path=$5 number=$6 marker tmp state_device epoch
+fm_pr_queued_record() {  # <state> <id> <provider> <host> <path> <number> <epoch>
+  local state=$1 id=$2 provider=$3 host=$4 path=$5 number=$6 epoch=$7 marker tmp state_device
   fm_pr_task_id_valid "$id" || return 1
+  case "$epoch" in ''|*[!0-9]*) return 1 ;; esac
   [ -d "$state" ] && [ ! -L "$state" ] || return 1
   state_device=$(fm_pr_file_device "$state") || return 1
   marker="$state/$id.pr-queued"
   fm_pr_regular_destination_on_device_or_absent "$marker" "$state_device" || return 1
-  epoch=$(date +%s)
   umask 077
   tmp=$(mktemp "$state/.fm-pr-queued.XXXXXX") || return 1
   if ! printf '%s\n%s\n%s\n%s\n%s\n%s\n' \

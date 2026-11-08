@@ -1812,6 +1812,7 @@ github_report_queue_rules() {
 # queued either way, so a failed record is reported and not a failed merge.
 record_github_queueing() {
   fm_pr_queued_record "$STATE" "$ID" "$FM_PR_PROVIDER" "$FM_PR_HOST" "$FM_PR_PATH" "$FM_PR_NUMBER" \
+    "$QUEUE_SINCE_EPOCH" \
     || printf 'actionable: %s is queued but the queueing could not be recorded, so a removal from the merge queue will not be reported\n' \
       "$URL" >&2
 }
@@ -1947,6 +1948,7 @@ case "$PROVIDER" in
       fi
       github_update_behind_branch || exit 1
     fi
+    QUEUE_SINCE_EPOCH=$(( $(date +%s) - 60 ))
     merge_status=0
     merge_output=$(gh pr merge "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" \
       --match-head-commit "$FM_PR_MERGE_HEAD" \

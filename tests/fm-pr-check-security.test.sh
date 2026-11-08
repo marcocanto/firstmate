@@ -1918,7 +1918,7 @@ test_teardown_removes_poll_artifacts() {
   printf 'registration\n' > "$dir/home/state/task-a.pr-poll-registration"
   printf 'trust\n' > "$dir/home/state/task-a.check-trust"
   printf 'https://github.com/o/r/pull/9\n' > "$dir/home/state/task-a.pr-register-refused"
-  fm_pr_queued_record "$dir/home/state" task-a github github.com o/r 9 || fail "could not record the queueing"
+  fm_pr_queued_record "$dir/home/state" task-a github github.com o/r 9 "$(date +%s)" || fail "could not record the queueing"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -2885,7 +2885,7 @@ queued_poll_case() {  # <case-name> <url>
   state="$dir/home/state"
   write_poll_meta "$state" task-a "$2"
   seed_canonical_poll "$dir" task-a "$2"
-  fm_pr_queued_record "$state" task-a github github.com o/r 1 || fail "could not record the queueing"
+  fm_pr_queued_record "$state" task-a github github.com o/r 1 "$(date +%s)" || fail "could not record the queueing"
   ln -sf "$REAL_JQ" "$dir/fakebin/jq"
   printf '%s\n' "$dir"
 }
@@ -2962,7 +2962,7 @@ test_unqueued_removal_wakes_once_per_removal() {
 
   # Queued again, removed again: a second report. Then a merge still reports.
   sleep 1
-  fm_pr_queued_record "$state" task-a github github.com o/r 1 || fail "could not record the second queueing"
+  fm_pr_queued_record "$state" task-a github github.com o/r 1 "$(date +%s)" || fail "could not record the second queueing"
   rm -f "$state/.last-check"
   set +e
   FM_TEST_GH_STATE=OPEN FM_TEST_GH_QUEUE_REASON=CI_FAILURE \
@@ -2976,7 +2976,7 @@ test_unqueued_removal_wakes_once_per_removal() {
   esac
   ack_watcher_cycle "$state" || fail "second unqueued wake acknowledgement failed"
 
-  fm_pr_queued_record "$state" task-a github github.com o/r 1 || fail "could not record the third queueing"
+  fm_pr_queued_record "$state" task-a github github.com o/r 1 "$(date +%s)" || fail "could not record the third queueing"
   rm -f "$state/.last-check"
   set +e
   FM_TEST_GH_STATE=MERGED run_watcher_bounded "$dir/home" "$dir/fakebin" > "$dir/watch-4.out" 2> "$dir/watch-4.err"
@@ -2989,6 +2989,23 @@ test_unqueued_removal_wakes_once_per_removal() {
   esac
   [ ! -e "$state/task-a.pr-queued" ] || fail "a merge left the queue record behind"
   pass "a removal from the merge queue wakes once per removal and a later merge still reports"
+}
+
+test_unqueued_report_keeps_a_later_queueing() {
+  local dir state url=https://github.com/o/r/pull/1
+  dir=$(queued_poll_case unqueued-keeps-later "$url")
+  state="$dir/home/state"
+  fm_pr_queued_record "$state" task-a github github.com o/r 1 2000000000 || fail "could not record the later queueing"
+  bash -c '. "$1/bin/fm-merge-outcome-lib.sh" && fm_merge_unqueued_report "$2" "$3" task-a "$4" 1000000000 CI_FAILURE' \
+    _ "$ROOT" "$dir/home" "$state" "$url" || fail "the earlier removal could not be reported"
+  assert_grep "left the merge queue without merging: task-a $url reason=CI_FAILURE" "$state/.wake-queue" \
+    "the earlier removal left no durable wake"
+  fm_pr_queued_read "$state" task-a github github.com o/r 1 && [ "$FM_PR_QUEUED_EPOCH" = 2000000000 ] \
+    || fail "reporting an earlier removal consumed a later queueing's record"
+  bash -c '. "$1/bin/fm-merge-outcome-lib.sh" && fm_merge_unqueued_report "$2" "$3" task-a "$4" 2000000000' \
+    _ "$ROOT" "$dir/home" "$state" "$url" || fail "the later removal could not be reported"
+  [ ! -e "$state/task-a.pr-queued" ] || fail "reporting the recorded queueing's removal kept its record"
+  pass "a removal report consumes only the queueing it reports"
 }
 
 test_unqueued_removal_reaches_the_parent_of_a_secondmate_home() {
@@ -4339,6 +4356,7 @@ test_rejected_metacharacter_bytes_are_inert
 test_static_poll_contract
 test_unqueued_poll_reads
 test_unqueued_removal_wakes_once_per_removal
+test_unqueued_report_keeps_a_later_queueing
 test_unqueued_removal_reaches_the_parent_of_a_secondmate_home
 test_atomic_interruption_leaves_no_partial_artifact
 test_concurrent_watcher_sees_only_complete_publication

@@ -1694,7 +1694,7 @@ test_github_queued_outcome_is_verified() {
 }
 
 test_github_failed_merge_command_that_queued_is_recorded() {
-  local case_dir rc
+  local case_dir rc before recorded
   case_dir=$(make_case github-failed-command-queued)
   mkdir -p "$case_dir/wt"
   add_gh_mocks_merge_fails "$case_dir"
@@ -1702,6 +1702,7 @@ test_github_failed_merge_command_that_queued_is_recorded() {
   : > "$case_dir/gh-axi.log"
   : > "$case_dir/gh.log"
 
+  before=$(date +%s)
   set +e
   run_pr_merge "$case_dir" task-x1 https://github.com/example/repo/pull/55 --attended-override -- --auto --merge \
     > "$case_dir/stdout" 2> "$case_dir/stderr"
@@ -1713,6 +1714,9 @@ test_github_failed_merge_command_that_queued_is_recorded() {
     "github-failed-command-queued: the queued read-back was not reported"
   [ -f "$case_dir/state/task-x1.pr-queued" ] \
     || fail "github-failed-command-queued: a pull request this run queued was not recorded for the merge poll"
+  recorded=$(sed -n 6p "$case_dir/state/task-x1.pr-queued")
+  [ "$recorded" -lt "$before" ] \
+    || fail "github-failed-command-queued: the queueing epoch $recorded is not earlier than the merge request at $before, so a prompt removal would be missed"
   pass "fm-pr-merge records a queueing even when the merge command itself failed"
 }
 
