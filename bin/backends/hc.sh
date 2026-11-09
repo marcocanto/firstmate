@@ -398,7 +398,7 @@ fm_backend_hc_hide() {  # <target> [expected-label]
   case "$state" in
     ready|finished) ;;
     foreign) echo "error: hc terminal $target does not carry this task's labels; refusing to hide it" >&2; return 1 ;;
-    *) echo "error: hc terminal $target is $state; it was not hided" >&2; return 1 ;;
+    *) echo "error: hc terminal $target is $state; it was not hidden" >&2; return 1 ;;
   esac
   fm_backend_hc_parse_target "$target" || return 1
   json=$(fm_backend_hc_get "$target") || return 1
