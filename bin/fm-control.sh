@@ -61,6 +61,9 @@
 #              a tmux server it cannot address, and it will not claim a stop it
 #              cannot see. hc likewise refuses missing or finished terminals:
 #              its record has no core or socket identity to prove absence.
+#              On hc, a `stopped` or `already-stopped` result also hides the
+#              terminal from the Herdr app's list (fm_backend_hide); a failed
+#              hide warns. `relaunch` shows it again through fm-spawn --relaunch.
 #              Refused on t3code before anything is sent: T3's `/mcp` tools
 #              have no session stop (bin/fm-control-lib.sh
 #              fm_control_backend_exit_supported); interrupt ends its turn.
@@ -1385,6 +1388,14 @@ case "$VERB" in
     ;;
   exit)
     result=$(do_exit)
+    # A stopped agent leaves its hc terminal listed in the app; hide it. The
+    # agent is already stopped, so a failed hide is a warning, not a refusal.
+    case "$result" in
+      stopped|already-stopped)
+        fm_backend_hide "$BACKEND" "$T" "$LABEL" \
+          || echo "warning: $ID's agent stopped but its terminal could not be hidden from the app list" >&2
+        ;;
+    esac
     echo "$result $ID harness=$HARNESS backend=$BACKEND endpoint=$T worktree=$WT"
     ;;
   relaunch)

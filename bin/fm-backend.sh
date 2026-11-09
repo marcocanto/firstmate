@@ -1385,6 +1385,29 @@ fm_backend_kill() {  # <backend> <target>
   esac
 }
 
+# fm_backend_hide / fm_backend_show: keep an agent-less task endpoint out of a
+# backend's app listing, and put it back before a replacement agent starts.
+# Only hc has the problem (its terminal outlives the agent and the Herdr app
+# lists it until teardown; bin/backends/hc.sh owns the mechanics); every other
+# backend is a successful no-op.
+fm_backend_hide() {  # <backend> <target> [expected-label]
+  local backend=$1
+  shift
+  case "$backend" in
+    hc) fm_backend_source hc || return 1; fm_backend_hc_hide "$@" ;;
+    *) return 0 ;;
+  esac
+}
+
+fm_backend_show() {  # <backend> <target> [expected-label]
+  local backend=$1
+  shift
+  case "$backend" in
+    hc) fm_backend_source hc || return 1; fm_backend_hc_show "$@" ;;
+    *) return 0 ;;
+  esac
+}
+
 fm_backend_remove_worktree() {  # <backend> <worktree-id>
   local backend=$1
   shift

@@ -36,6 +36,14 @@
 # core terminal names label the terminal and agent entry, not the tab. No app
 # window command runs.
 #
+# Hiding: a task terminal is a login shell that outlives its agent, and the app
+# keeps listing it, with the agent's last status message, until teardown.
+# fm_backend_hc_hide therefore moves herdr.space/herdr.tab onto
+# firstmate.parked.space/firstmate.parked.tab once the agent has stopped, and
+# fm_backend_hc_show moves them back before a replacement agent starts. Both
+# are idempotent, identity-checked, and keep their whole state on the
+# terminal's own labels. They never close a terminal.
+#
 # Placement beside Firstmate: when Firstmate runs inside a live hc terminal of
 # the task's session (fm_backend_hc_caller_terminal), each task terminal is
 # created as that terminal's child, so the app groups the crew under the
@@ -376,6 +384,54 @@ fm_backend_hc_create_task() {  # <session> <window-label> <cwd>
   address=$(printf '%s' "$out" | jq -r '.address // empty' 2>/dev/null)
   fm_backend_hc_address_valid "$address" || { echo "error: hc run did not return a terminal address for $label (got: $out)" >&2; return 1; }
   printf '%s\n' "$address"
+}
+
+# fm_backend_hc_hide: take an agent-less task terminal out of the app's list.
+# When herdr.space is non-empty, one `hc label` call copies herdr.space and
+# herdr.tab to firstmate.parked.space and firstmate.parked.tab and removes the
+# two herdr labels. A terminal with no herdr.space (already hidden, or never
+# shown) is a silent success. A missing, unreadable, or foreign terminal is a
+# refusal, so a recorded address can never relabel another home's terminal.
+fm_backend_hc_hide() {  # <target> [expected-label]
+  local target=$1 expected=${2:-'*'} state json fields space tab
+  state=$(fm_backend_hc_endpoint_state "$target" "$expected")
+  case "$state" in
+    ready|finished) ;;
+    foreign) echo "error: hc terminal $target does not carry this task's labels; refusing to hide it" >&2; return 1 ;;
+    *) echo "error: hc terminal $target is $state; it was not hided" >&2; return 1 ;;
+  esac
+  fm_backend_hc_parse_target "$target" || return 1
+  json=$(fm_backend_hc_get "$target") || return 1
+  fields=$(printf '%s' "$json" | jq -r '[.labels["herdr.space"] // "", .labels["herdr.tab"] // ""] | @tsv' 2>/dev/null) || return 1
+  IFS=$'\t' read -r space tab <<EOT
+$fields
+EOT
+  [ -n "$space" ] || return 0
+  fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" label --json "$FM_BACKEND_HC_ADDRESS" \
+    "firstmate.parked.space=$space" "firstmate.parked.tab=$tab" "herdr.space=" "herdr.tab=" >/dev/null 2>&1
+}
+
+# fm_backend_hc_show: the reverse of fm_backend_hc_hide. When
+# firstmate.parked.space is non-empty, restore herdr.space and herdr.tab from
+# the parked labels and remove the parked labels. A terminal that was never
+# hidden is a silent success; identity refusals match fm_backend_hc_hide.
+fm_backend_hc_show() {  # <target> [expected-label]
+  local target=$1 expected=${2:-'*'} state json fields space tab
+  state=$(fm_backend_hc_endpoint_state "$target" "$expected")
+  case "$state" in
+    ready|finished) ;;
+    foreign) echo "error: hc terminal $target does not carry this task's labels; refusing to show it" >&2; return 1 ;;
+    *) echo "error: hc terminal $target is $state; it was not shown" >&2; return 1 ;;
+  esac
+  fm_backend_hc_parse_target "$target" || return 1
+  json=$(fm_backend_hc_get "$target") || return 1
+  fields=$(printf '%s' "$json" | jq -r '[.labels["firstmate.parked.space"] // "", .labels["firstmate.parked.tab"] // ""] | @tsv' 2>/dev/null) || return 1
+  IFS=$'\t' read -r space tab <<EOT
+$fields
+EOT
+  [ -n "$space" ] || return 0
+  fm_backend_hc_cli "$FM_BACKEND_HC_SESSION" label --json "$FM_BACKEND_HC_ADDRESS" \
+    "herdr.space=$space" "herdr.tab=$tab" "firstmate.parked.space=" "firstmate.parked.tab=" >/dev/null 2>&1
 }
 
 # fm_backend_hc_capture: the screen plus <lines> of history, the same window

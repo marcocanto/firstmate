@@ -77,6 +77,12 @@ The terminal carries these labels:
 | `herdr.space` | `FM_HC_SPACE` when set, else the space of Firstmate's own hc terminal, else `fm-<hometag>` | Groups a home's tasks in one Herdr.app space, beside Firstmate when it runs in one. |
 | `herdr.tab` | `<hometag>-fm-<id>` | One Herdr.app tab per task. |
 
+A task terminal is a login shell that keeps running after its agent stops, so the app would keep listing it, with the agent's last status message, until teardown.
+`fm-control.sh <id> exit` therefore hides the terminal once the agent is proven stopped, and `relaunch` shows it again before the replacement agent starts.
+Hiding copies `herdr.space` and `herdr.tab` to `firstmate.parked.space` and `firstmate.parked.tab` and removes the two `herdr.*` labels; showing reverses that.
+Both steps are idempotent, refuse a terminal whose `firstmate.task` and `firstmate.home` labels do not match the record, and never close a terminal, so `fm-control` still addresses a hidden one.
+A failed hide or show is a warning because the agent state it follows already holds.
+
 ```text
 backend=hc
 backend_detect=app-terminal

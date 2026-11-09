@@ -4946,6 +4946,11 @@ if [ "$RELAUNCH" -eq 1 ]; then
     T=$RELAUNCH_TARGET
     WT_TARGET=$T
     SES=${T%%:*}
+    # An hc terminal that `fm-control exit` hid from the app is shown again
+    # before the replacement agent starts. The agent runs either way, so a
+    # failed show is a warning.
+    fm_backend_show "$BACKEND" "$T" "fm-$ID" \
+      || echo "warning: could not show $ID's terminal in the app list before relaunch" >&2
   elif [ "$BACKEND" = rex ]; then
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh endpoint for the same task, opened directly in the

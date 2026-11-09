@@ -48,6 +48,22 @@ case "$cmd" in
     [ -f "$D/$last.json" ] || { printf '{"error":{"kind":"not_found"}}\n' >&2; exit 3; }
     cat "$D/$last.json"
     ;;
+  label)
+    # hc label <terminal> <k=v>...: `k=` removes the key.
+    shift
+    [ "${1:-}" != --json ] || shift
+    addr=$1
+    shift
+    [ -f "$D/$addr.json" ] || { printf '{"error":{"kind":"not_found"}}\n' >&2; exit 3; }
+    for kv in "$@"; do
+      if [ -n "${kv#*=}" ]; then
+        jq --arg k "${kv%%=*}" --arg v "${kv#*=}" '.labels[$k] = $v' "$D/$addr.json" > "$D/new.json"
+      else
+        jq --arg k "${kv%%=*}" 'del(.labels[$k])' "$D/$addr.json" > "$D/new.json"
+      fi
+      mv "$D/new.json" "$D/$addr.json"
+    done
+    printf '{}\n' ;;
   rm) [ -e "$D/rm-sticks" ] || rm -f "$D/$last.json"; printf '{}\n' ;;
   read)
     [ ! -e "$D/read-fails" ] || exit 1
@@ -620,6 +636,97 @@ test_control_relaunch_failure_boundaries() {
   pass "hc: relaunch refusals preserve the old agent and post-stop failures retain a named recovery state"
 }
 
+# Give a fake terminal the app labels create_task sets.
+set_app_labels() {  # <address> <space> <tab>
+  jq --arg s "$2" --arg t "$3" '.labels["herdr.space"]=$s | .labels["herdr.tab"]=$t' "$D/$1.json" > "$D/new.json"
+  mv "$D/new.json" "$D/$1.json"
+}
+
+label_of() {  # <address> <key> -> value, empty when absent
+  jq -r --arg k "$2" '.labels[$k] // ""' "$D/$1.json"
+}
+
+test_hide_and_show_round_trip_on_the_terminals_own_labels() {
+  local tag labels
+  setup_case hide-show
+  tag=$(hometag_of)
+  write_terminal "$D" t1 live fm-a1 "$tag" sh sh
+  set_app_labels t1 fm-space "$tag-fm-a1"
+  hc_shell 'fm_backend_hide hc fmtest:t1 fm-a1' || fail "hide must succeed on an own terminal"
+  assert_equals "$(label_of t1 herdr.space)" "" "hide removes herdr.space"
+  assert_equals "$(label_of t1 herdr.tab)" "" "hide removes herdr.tab"
+  assert_equals "$(label_of t1 firstmate.parked.space)" fm-space "hide parks the space"
+  assert_equals "$(label_of t1 firstmate.parked.tab)" "$tag-fm-a1" "hide parks the tab"
+  assert_equals "$(label_of t1 firstmate.task)" fm-a1 "hide keeps the task identity"
+  assert_equals "$(label_of t1 firstmate.home)" "$tag" "hide keeps the home identity"
+  assert_not_contains "$(cat "$D/log")" $'\x1fkill\x1f' "hide never closes the terminal"
+  labels=$(jq -S -c .labels "$D/t1.json")
+  hc_shell 'fm_backend_hide hc fmtest:t1 fm-a1' || fail "a second hide must succeed"
+  assert_equals "$(jq -S -c .labels "$D/t1.json")" "$labels" "hide is idempotent"
+  hc_shell 'fm_backend_show hc fmtest:t1 fm-a1' || fail "show must succeed"
+  assert_equals "$(label_of t1 herdr.space)" fm-space "show restores herdr.space"
+  assert_equals "$(label_of t1 herdr.tab)" "$tag-fm-a1" "show restores herdr.tab"
+  assert_equals "$(label_of t1 firstmate.parked.space)" "" "show removes the parked space"
+  assert_equals "$(label_of t1 firstmate.parked.tab)" "" "show removes the parked tab"
+  labels=$(jq -S -c .labels "$D/t1.json")
+  hc_shell 'fm_backend_show hc fmtest:t1 fm-a1' || fail "a second show must succeed"
+  assert_equals "$(jq -S -c .labels "$D/t1.json")" "$labels" "show is idempotent"
+  hc_shell 'fm_backend_hide hc fmtest:t1 fm-a1' && hc_shell 'fm_backend_hide hc fmtest:t1 fm-a1'
+  hc_shell 'fm_backend_show hc fmtest:t1 fm-a1' || fail "show after a repeated hide must succeed"
+  assert_equals "$(label_of t1 herdr.space)" fm-space "a repeated hide still restores the original space"
+  hc_shell 'fm_backend_hide tmux fmtest:t1 fm-a1' || fail "other backends hide as a no-op"
+  pass "hc: hide and show round-trip the app labels, are idempotent, and keep task identity"
+}
+
+test_hide_and_show_refuse_a_foreign_terminal() {
+  local tag before scenario
+  setup_case hide-foreign
+  tag=$(hometag_of)
+  for scenario in other-task other-home unlabeled missing; do
+    write_terminal "$D" t1 live fm-other "$tag" sh sh
+    case "$scenario" in
+      other-home) jq '.labels["firstmate.home"]="stranger"' "$D/t1.json" > "$D/new.json"; mv "$D/new.json" "$D/t1.json" ;;
+      unlabeled) jq '.labels={}' "$D/t1.json" > "$D/new.json"; mv "$D/new.json" "$D/t1.json" ;;
+      missing) rm "$D/t1.json" ;;
+    esac
+    if [ -f "$D/t1.json" ]; then
+      set_app_labels t1 fm-space tab-x
+      jq '.labels["firstmate.parked.space"]="p-space"' "$D/t1.json" > "$D/new.json"; mv "$D/new.json" "$D/t1.json"
+      before=$(jq -S -c . "$D/t1.json")
+    fi
+    expect_refused hc_shell 'fm_backend_hide hc fmtest:t1 fm-a1'
+    expect_refused hc_shell 'fm_backend_show hc fmtest:t1 fm-a1'
+    [ ! -f "$D/t1.json" ] || assert_equals "$(jq -S -c . "$D/t1.json")" "$before" "$scenario terminal must stay untouched"
+  done
+  assert_not_contains "$(cat "$D/log")" $'\x1flabel\x1f' "no label call reaches a terminal that is not this task's"
+  pass "hc: hide and show refuse a terminal whose identity labels do not match the record"
+}
+
+test_control_exit_hides_the_terminal_and_relaunch_shows_it() {
+  local out tag
+  setup_control_case control-visibility
+  tag=$(jq -r '.labels["firstmate.home"]' "$D/t2.json")
+  set_app_labels t2 fm-space "$tag-fm-$CONTROL_ID"
+  out=$(run_hc_control exit) || fail "$out"
+  assert_equals "$(label_of t2 herdr.space)" "" "exit hides the stopped agent's terminal"
+  assert_equals "$(label_of t2 firstmate.parked.space)" fm-space "exit parks the space"
+  assert_equals "$(label_of t2 firstmate.parked.tab)" "$tag-fm-$CONTROL_ID" "exit parks the tab"
+  out=$(run_hc_control exit) || fail "$out"
+  assert_equals "$(label_of t2 firstmate.parked.space)" fm-space "an already-stopped exit stays hidden"
+  assert_equals "$(label_of t2 herdr.space)" "" "an already-stopped exit stays hidden"
+  out=$(run_hc_control relaunch --note 'Resume.') || fail "$out"
+  assert_equals "$(label_of t2 herdr.space)" fm-space "relaunch shows the terminal again"
+  assert_equals "$(label_of t2 herdr.tab)" "$tag-fm-$CONTROL_ID" "relaunch restores the tab"
+  assert_equals "$(label_of t2 firstmate.parked.space)" "" "relaunch clears the parked labels"
+  assert_equals "$(jq -r '.foreground.name' "$D/t2.json")" omp "the replacement agent is running"
+  # A relaunch of a terminal that was never hidden keeps it visible.
+  setup_control_case control-visibility-plain
+  set_app_labels t2 fm-space tab-x
+  out=$(run_hc_control relaunch --note 'Resume.') || fail "$out"
+  assert_equals "$(label_of t2 herdr.space)" fm-space "relaunch of a visible terminal keeps it visible"
+  pass "hc: exit hides the stopped agent's terminal and relaunch shows it before the new agent starts"
+}
+
 test_process_scan_failures_never_prove_dead() {
   local scenario out rc
   for scenario in pgid-fails list-fails empty missing-pid wrong-group args-fails; do
@@ -814,6 +921,9 @@ fm_test_run \
   test_control_exit_never_claims_an_unconfirmed_stop \
   test_control_relaunch_reuses_identity_work_and_name \
   test_control_relaunch_failure_boundaries \
+  test_hide_and_show_round_trip_on_the_terminals_own_labels \
+  test_hide_and_show_refuse_a_foreign_terminal \
+  test_control_exit_hides_the_terminal_and_relaunch_shows_it \
   test_task_names_are_valid_stable_and_collision_safe \
   test_process_scan_failures_never_prove_dead \
   test_secondmate_spawn_lands_in_the_mates_own_space
