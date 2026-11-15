@@ -1075,8 +1075,10 @@ The sorter runs only on a status-line wake the watcher was about to deliver, and
 Plain rules decide first, with no network.
 A `needs-decision`, `blocked`, `failed`, `paused`, or `done` line always wakes, including a `done` steer reply with a `corr=<16 hex>` token, as does any line that states a `[key=...]`, names a `child-outcome` or `child-pr` key, names a pull or merge request URL or `pr=` token, mentions a merge, or carries a captain token such as `PR ready`.
 Only `working:` lines, including steer replies, reach the model.
-For each of those, the watcher sends one chat-completions request asking whether the supervisor needs to act on or learn from the line now, and holds the line only when the answer is `no` at or above `hold_confidence`.
-A `yes`, a `no` below that threshold, a timeout, a connection failure, a non-200 answer, a malformed answer, a missing key, `curl`, or `jq`, an invalid config, or more than four candidate lines in one wake all wake.
+For each of those, the watcher sends one request, in the shape `api` selects, asking whether the supervisor needs to act on or learn from the line now.
+With `api=chat` it holds the line only when the answer is `no` at or above `hold_confidence`.
+With `api=systemone` it holds the line only when the returned probability that the supervisor needs the line is at or below `1 - hold_confidence`.
+A `yes`, an answer in the unsure band between those thresholds, a timeout, a connection failure, a non-200 answer, a malformed answer, a missing key, `curl`, or `jq`, an invalid config, or more than four candidate lines in one wake all wake.
 A wake is held only when every new line in it is held.
 
 ### Held lines
@@ -1089,6 +1091,7 @@ Holding a line adds no wake of its own, so held lines wait for the next drain.
 ### File format
 
 ```text
+api=chat
 endpoint=https://llm.example.invalid/v1/chat/completions
 model=small-model
 key_file=/absolute/path/to/key
@@ -1096,7 +1099,10 @@ timeout=5
 hold_confidence=0.8
 ```
 
-`endpoint` is an `http` or `https` URL that accepts a chat-completions request with `model` and `messages` and returns the answer in `choices[0].message.content`.
+`api` selects the request shape and defaults to `chat`; any other value than `chat` or `systemone` makes the config invalid.
+With `api=chat`, `endpoint` is an `http` or `https` URL that accepts a chat-completions request with `model` and `messages` and returns the answer in `choices[0].message.content`.
+With `api=systemone`, `endpoint` is a System One URL such as TypeSafe's `https://api.typesafe.ai/v1/systemone`, which receives the line as `state` with one Noul question and its true and false criteria, and returns its probability under `answers.<question id>.noul` ([Noul reference](https://docs.typesafe.ai/primitives/noul.md)).
+The sorter never infers the shape from the endpoint URL.
 `key_file` is an absolute path whose first line is sent as a bearer token; keep it outside the repository and readable only by you.
 `timeout` is whole seconds from 1 to 30, defaults to 5, and bounds each request.
 `hold_confidence` is a decimal from 0.5 to 1 and defaults to 0.8.

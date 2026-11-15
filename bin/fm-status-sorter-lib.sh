@@ -17,13 +17,19 @@
 #     prefix. A candidate still wakes when it states a [key=...],
 #     names a child-outcome or child-pr key, names a PR URL or pr= token,
 #     mentions a merge, or matches the classifier's free-text captain tokens.
-#   - Model tier, only for candidates the rules left. One chat-completions
-#     request per candidate asks whether the supervisor needs to act on or
-#     learn from the line now. Only an answer of "no" at or above
-#     hold_confidence holds it. A "yes", the unsure band below that threshold, a
-#     timeout, a connection failure, a non-200 answer, a missing key, curl or
-#     jq, an invalid config, more than FM_STATUS_SORTER_MAX_CANDIDATES
-#     candidates in one batch, or a malformed answer wakes.
+#   - Model tier, only for candidates the rules left. One request per
+#     candidate asks whether the supervisor needs to act on or learn from the
+#     line now, in the shape config api= selects:
+#       chat      an OpenAI-style chat-completions request; only an answer of
+#                 "no" at or above hold_confidence holds the line.
+#       systemone a System One request (TypeSafe's public API) with the line as
+#                 state and one Noul question whose statement is true when
+#                 the supervisor needs the line now; only a probability at or
+#                 below 1 - hold_confidence holds the line.
+#     A "yes", the unsure band, a timeout, a connection failure, a non-200
+#     answer, a missing key, curl or jq, an invalid config, more than
+#     FM_STATUS_SORTER_MAX_CANDIDATES candidates in one batch, or a malformed
+#     answer wakes.
 # The batch is held only when every new line of every status file in it is
 # held; any wake surfaces the whole batch exactly as without the sorter.
 #
@@ -38,7 +44,8 @@
 #
 # Config (config/status-sorter, local and gitignored; docs/configuration.md
 # "Status-wake sorter" owns the operator-facing description):
-#   endpoint=<http or https URL of a chat-completions endpoint>   required
+#   api=chat|systemone                                             default chat
+#   endpoint=<http or https URL that accepts the api's request>    required
 #   model=<model name sent in the request>                        required
 #   key_file=<absolute path of a file whose first line is the key> required
 #   timeout=<whole seconds, 1-30>                                  default 5
@@ -63,6 +70,14 @@ FM_STATUS_SORTER_SECTION_BYTES=4000
 # pull or merge request URL, a pr= metadata token, or any merge wording.
 FM_STATUS_SORTER_NEWS_RE='https?://[^[:space:]]+/(pull|pulls|merge_requests|merge-requests)/[0-9]+|(^|[^[:alnum:]_])pr=|merg'
 FM_STATUS_SORTER_PROMPT='You sort status lines that worker agents append for their supervisor, an agent that is woken for every line it must handle. Answer one question about the line you are given: does the supervisor need to act on or learn from this line now? Reply with only a JSON object of the form {"answer":"yes","confidence":0.9}, where answer is "yes" or "no" and confidence is a number from 0 to 1. Answer "yes" when unsure.'
+# The systemone Noul question: its id, a statement whose probability of being
+# true is the probability the line must wake the supervisor, and the criteria
+# that say what true and false mean. Without criteria, routine progress lines
+# scored 0.2 to 0.5 live; with them, a routine line scored 0.08.
+FM_STATUS_SORTER_QUESTION_ID='supervisor_needs_line'
+FM_STATUS_SORTER_STATEMENT='The state is one status line that a worker agent appended for its supervisor, an agent that is woken for every line it must handle. Statement: the supervisor needs to act on or learn from this status line now.'
+FM_STATUS_SORTER_CRITERIA_TRUE='The line reports a problem, a risk, a mistake, a need for input, access, or a decision, or news the supervisor would act on.'
+FM_STATUS_SORTER_CRITERIA_FALSE='The line only reports routine progress on work that is going as planned.'
 
 FM_STATUS_SORTER_REASON=''
 FM_STATUS_SORTER_CANDIDATES=''
@@ -89,11 +104,11 @@ fm_status_sorter_enabled() {  # <config-dir>
   [ -e "$path" ] || [ -L "$path" ]
 }
 
-# Load and validate config/status-sorter into FM_STATUS_SORTER_ENDPOINT,
+# Load and validate config/status-sorter into FM_STATUS_SORTER_API, _ENDPOINT,
 # _MODEL, _KEY_FILE, _TIMEOUT, and _HOLD_CONFIDENCE. 1 with
 # FM_STATUS_SORTER_CONFIG_ERROR set when the file is unreadable or invalid.
 fm_status_sorter_load_config() {  # <config-dir>
-  local path line key value endpoint='' model='' key_file='' timeout=5 hold=0.8 n=0
+  local path line key value api=chat endpoint='' model='' key_file='' timeout=5 hold=0.8 n=0
   path=$(fm_status_sorter_config_path "$1")
   FM_STATUS_SORTER_CONFIG_ERROR=''
   if [ ! -f "$path" ] || [ ! -r "$path" ]; then
@@ -112,6 +127,7 @@ fm_status_sorter_load_config() {  # <config-dir>
     key=${key%"${key##*[![:space:]]}"}
     value=${value#"${value%%[![:space:]]*}"}
     case "$key" in
+      api) api=$value ;;
       endpoint) endpoint=$value ;;
       model) model=$value ;;
       key_file) key_file=$value ;;
@@ -120,6 +136,10 @@ fm_status_sorter_load_config() {  # <config-dir>
       *) FM_STATUS_SORTER_CONFIG_ERROR="line $n has unknown key '$key'"; return 1 ;;
     esac
   done < "$path"
+  case "$api" in
+    chat|systemone) ;;
+    *) FM_STATUS_SORTER_CONFIG_ERROR="api must be chat or systemone"; return 1 ;;
+  esac
   case "$endpoint" in
     http://?*|https://?*) ;;
     *) FM_STATUS_SORTER_CONFIG_ERROR="endpoint must be an http or https URL"; return 1 ;;
@@ -140,6 +160,7 @@ fm_status_sorter_load_config() {  # <config-dir>
     FM_STATUS_SORTER_CONFIG_ERROR="hold_confidence must be a decimal from 0.5 to 1"
     return 1
   fi
+  FM_STATUS_SORTER_API=$api
   FM_STATUS_SORTER_ENDPOINT=$endpoint
   FM_STATUS_SORTER_MODEL=$model
   FM_STATUS_SORTER_KEY_FILE=$key_file
@@ -247,6 +268,17 @@ _fm_status_sorter_parse_answer() {  # <response-file>
   ' "$1" 2>/dev/null || printf 'malformed'
 }
 
+# Parse one System One response body into "p <probability>" from the Noul
+# answer under the question id, or "malformed".
+_fm_status_sorter_parse_noul() {  # <response-file>
+  jq -r --arg id "$FM_STATUS_SORTER_QUESTION_ID" '
+    (.answers[$id] // null) as $a
+    | if ($a | type) == "object" and $a.type == "noul" and ($a.noul | type) == "number"
+        and $a.noul >= 0 and $a.noul <= 1
+      then "p \($a.noul)" else "malformed" end
+  ' "$1" 2>/dev/null || printf 'malformed'
+}
+
 # Model tier for one candidate line, with the config already loaded. 0 holds
 # it; 1 wakes it. FM_STATUS_SORTER_REASON names the outcome either way.
 fm_status_sorter_ask() {  # <status-line>
@@ -270,10 +302,17 @@ fm_status_sorter_ask() {  # <status-line>
     FM_STATUS_SORTER_REASON='model: no scratch directory'
     return 1
   }
-  if ! jq -n --arg model "$FM_STATUS_SORTER_MODEL" --arg sys "$FM_STATUS_SORTER_PROMPT" \
-    --arg line "$line" \
-    '{model: $model, messages: [{role: "system", content: $sys}, {role: "user", content: ("Status line: " + $line)}]}' \
-    > "$tmp/body" 2>/dev/null; then
+  if [ "$FM_STATUS_SORTER_API" = systemone ]; then
+    jq -n --arg model "$FM_STATUS_SORTER_MODEL" --arg line "$line" \
+      --arg id "$FM_STATUS_SORTER_QUESTION_ID" --arg statement "$FM_STATUS_SORTER_STATEMENT" \
+      --arg yes "$FM_STATUS_SORTER_CRITERIA_TRUE" --arg no "$FM_STATUS_SORTER_CRITERIA_FALSE" \
+      '{state: $line, model: $model, questions: {($id): {type: "noul", instructions: $statement, criteria: {true: $yes, false: $no}}}}'
+  else
+    jq -n --arg model "$FM_STATUS_SORTER_MODEL" --arg sys "$FM_STATUS_SORTER_PROMPT" \
+      --arg line "$line" \
+      '{model: $model, messages: [{role: "system", content: $sys}, {role: "user", content: ("Status line: " + $line)}]}'
+  fi > "$tmp/body" 2>/dev/null
+  if [ ! -s "$tmp/body" ]; then
     rm -rf "$tmp"
     FM_STATUS_SORTER_REASON='model: request could not be built'
     return 1
@@ -294,11 +333,29 @@ fm_status_sorter_ask() {  # <status-line>
     FM_STATUS_SORTER_REASON="model: answered HTTP $code"
     return 1
   fi
-  verdict=$(_fm_status_sorter_parse_answer "$tmp/response")
+  if [ "$FM_STATUS_SORTER_API" = systemone ]; then
+    verdict=$(_fm_status_sorter_parse_noul "$tmp/response")
+  else
+    verdict=$(_fm_status_sorter_parse_answer "$tmp/response")
+  fi
   rm -rf "$tmp"
   answer=${verdict%% *}
   confidence=${verdict#* }
   case "$answer" in
+    p)
+      # Hold only at or below 1 - hold_confidence; the sum form avoids
+      # rounding 1 - 0.8 below 0.2.
+      if awk -v p="$confidence" -v t="$FM_STATUS_SORTER_HOLD_CONFIDENCE" 'BEGIN { exit !(p + t <= 1 + 1e-9) }'; then
+        FM_STATUS_SORTER_REASON="model: no (probability $confidence that the line needs the supervisor)"
+        return 0
+      fi
+      if awk -v p="$confidence" 'BEGIN { exit !(p + 0 >= 0.5) }'; then
+        FM_STATUS_SORTER_REASON="model: yes (probability $confidence that the line needs the supervisor)"
+      else
+        FM_STATUS_SORTER_REASON="model: unsure (probability $confidence that the line needs the supervisor, above $(awk -v t="$FM_STATUS_SORTER_HOLD_CONFIDENCE" 'BEGIN { print 1 - t }'))"
+      fi
+      return 1
+      ;;
     yes)
       FM_STATUS_SORTER_REASON="model: yes (confidence $confidence)"
       return 1

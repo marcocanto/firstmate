@@ -34,10 +34,13 @@ trap 'stop_stubs; fm_test_cleanup' EXIT
 
 CORR=0123456789abcdef
 
-# A local chat-completions stub. <dir>/mode holds "<kind> <content>": kind
-# "answer" returns <content> as the assistant message, "status" returns that
-# HTTP status, and "sleep" waits <content> seconds before a sure-hold answer.
-# Every request is appended to <dir>/requests.log as one JSON line.
+# A local model stub. <dir>/mode holds "<kind> <content>": kind "answer"
+# returns <content> as a chat-completions assistant message, "noul" answers a
+# System One request with the JSON value <content> as the noul under every
+# question id the request sent, "raw" returns <content> as the whole body,
+# "status" returns that HTTP status, and "sleep" waits <content> seconds before
+# a sure-hold chat answer. Every request is appended to <dir>/requests.log as
+# one JSON line.
 stub_start() {  # <dir> -> port on stdout
   local dir=$1 i=0
   command -v python3 >/dev/null 2>&1 || fail "python3 is required for the local model stub"
@@ -62,6 +65,15 @@ class H(BaseHTTPRequestHandler):
             kind, content = "answer", '{"answer":"no","confidence":0.99}'
         if kind == "status":
             code, raw = int(content), b'{"error":"stub"}'
+        elif kind == "raw":
+            code, raw = 200, content.encode()
+        elif kind == "noul":
+            ids = list(json.loads(body or b"{}").get("questions", {}))
+            code = 200
+            raw = json.dumps({"model": "stub-model-1",
+                              "answers": {i: {"type": "noul", "noul": json.loads(content)}
+                                          for i in ids},
+                              "usage": {"input_tokens": 1, "output_tokens": 1}}).encode()
         else:
             code = 200
             raw = json.dumps({"choices": [{"message": {"role": "assistant",
@@ -106,8 +118,9 @@ stub_requests() {  # <dir>
 }
 
 # Write config/status-sorter for <config-dir> against the stub on <port>.
-write_sorter_config() {  # <config-dir> <port> [timeout]
-  local cfg=$1 port=$2 timeout=${3:-2}
+# A non-empty [api] adds an api= line.
+write_sorter_config() {  # <config-dir> <port> [timeout] [api]
+  local cfg=$1 port=$2 timeout=${3:-2} api=${4:-}
   mkdir -p "$cfg"
   printf 'test-key\n' > "$cfg/sorter.key"
   cat > "$cfg/status-sorter" <<EOF
@@ -117,6 +130,7 @@ model=stub-model
 key_file=$cfg/sorter.key
 timeout=$timeout
 EOF
+  [ -z "$api" ] || printf 'api=%s\n' "$api" >> "$cfg/status-sorter"
 }
 
 # Library-level batch decision: rule tier over <span>, then the model tier.
@@ -255,6 +269,83 @@ test_model_never_asked_without_usable_input() {
   [ "$(stub_requests "$dir")" = 0 ] || fail "the model was asked without a usable key, config, or candidate set"
   stop_stubs
   pass "model tier: a missing key, an invalid config, an oversized batch, a done steer reply, or a rule wake never reaches the model"
+}
+
+test_systemone_holds_only_a_low_probability() {
+  local dir cfg port req p
+  dir="$TMP_ROOT/systemone-hold"; cfg="$dir/config"; mkdir -p "$dir"
+  port=$(stub_start "$dir")
+  write_sorter_config "$cfg" "$port" 2 systemone
+  stub_mode "$dir" noul 0.05
+  decide_span "$cfg" mate1 "working corr=$CORR: recorded" \
+    || fail "a low Noul probability did not hold the line: $FM_STATUS_SORTER_REASON"
+  [ "$FM_STATUS_SORTER_HELD" = "mate1"$'\t'"model"$'\t'"model: no (probability 0.05 that the line needs the supervisor)"$'\t'"working corr=$CORR: recorded"$'\n' ] \
+    || fail "held row did not carry task, tier, reason, and line: $(printf '%q' "$FM_STATUS_SORTER_HELD")"
+  [ "$(stub_requests "$dir")" = 1 ] || fail "a single candidate did not make exactly one request"
+  req=$(head -n 1 "$dir/requests.log")
+  [ "$(printf '%s' "$req" | jq -r .auth)" = 'Bearer test-key' ] || fail "the key file was not sent as a bearer header: $req"
+  printf '%s' "$req" | jq -e --arg line "working corr=$CORR: recorded" '.body | fromjson
+    | .state == $line and .model == "stub-model" and (has("messages") | not)
+    and (.questions | length) == 1
+    and ([.questions[]][0] | .type == "noul" and (.instructions | type) == "string" and (.instructions | length) > 0
+      and (.criteria.true | type) == "string" and (.criteria.false | type) == "string")' >/dev/null \
+    || fail "the request was not a System One body with the line as state and one Noul question: $req"
+  stub_mode "$dir" noul 0.2
+  decide_span "$cfg" mate1 "working: re-read done" \
+    || fail "a probability exactly at 1 - hold_confidence did not hold: $FM_STATUS_SORTER_REASON"
+  for p in 0.97 0.5 0.25; do
+    stub_mode "$dir" noul "$p"
+    ! decide_span "$cfg" mate1 "working: started" || fail "a Noul probability of $p held the line"
+    assert_contains "$FM_STATUS_SORTER_REASON" "probability $p" "the wake reason must name the probability"
+  done
+  assert_contains "$FM_STATUS_SORTER_REASON" "unsure" "an in-between probability must read as unsure"
+  printf 'hold_confidence=0.7\n' >> "$cfg/status-sorter"
+  stub_mode "$dir" noul 0.25
+  decide_span "$cfg" mate1 "working: started" || fail "a configured lower hold_confidence was not honoured"
+  stop_stubs
+  pass "systemone: only a probability at or below 1 - hold_confidence holds; high and in-between probabilities wake"
+}
+
+test_systemone_malformed_and_errors_wake() {
+  local dir cfg port body
+  dir="$TMP_ROOT/systemone-wake"; cfg="$dir/config"; mkdir -p "$dir"
+  port=$(stub_start "$dir")
+  write_sorter_config "$cfg" "$port" 2 systemone
+  while IFS= read -r body; do
+    stub_mode "$dir" raw "$body"
+    ! decide_span "$cfg" mate1 "working: started" || fail "a malformed System One answer held the line: $body"
+    assert_contains "$FM_STATUS_SORTER_REASON" "malformed" "a malformed answer must be named: $body"
+  done <<'EOF'
+{"answers":{}}
+{"answers":{"other_question":{"type":"noul","noul":0.01}}}
+{"answers":{"supervisor_needs_line":{"type":"noul","noul":"0.01"}}}
+{"answers":{"supervisor_needs_line":{"type":"noul","noul":-0.1}}}
+{"answers":{"supervisor_needs_line":{"type":"score","noul":0.01}}}
+{"choices":[{"message":{"role":"assistant","content":"{\"answer\":\"no\",\"confidence\":0.99}"}}]}
+not json
+EOF
+  stub_mode "$dir" status 500
+  ! decide_span "$cfg" mate1 "working: started" || fail "a 500 answer held the line"
+  assert_contains "$FM_STATUS_SORTER_REASON" "HTTP 500" "a non-200 answer must be named"
+  stop_stubs
+  pass "systemone: a missing, mistyped, out-of-range, or chat-shaped answer and a non-200 answer wake"
+}
+
+test_api_key_selects_the_shape() {
+  local dir cfg port
+  dir="$TMP_ROOT/api-key"; cfg="$dir/config"; mkdir -p "$dir"
+  port=$(stub_start "$dir")
+  write_sorter_config "$cfg" "$port" 2 chat
+  decide_span "$cfg" mate1 "working: started" \
+    || fail "an explicit api=chat did not keep the chat shape: $FM_STATUS_SORTER_REASON"
+  head -n 1 "$dir/requests.log" | jq -e '.body | fromjson | has("messages") and (has("questions") | not)' >/dev/null \
+    || fail "api=chat did not send a chat-completions request"
+  write_sorter_config "$cfg" "$port" 2 openai
+  ! decide_span "$cfg" mate1 "working: started" || fail "an unknown api value held the line"
+  assert_contains "$FM_STATUS_SORTER_REASON" "config invalid" "an unknown api must make the config invalid"
+  [ "$(stub_requests "$dir")" = 1 ] || fail "an unknown api value still sent a request"
+  stop_stubs
+  pass "config: api=chat keeps the chat shape and an unknown api value invalidates the config"
 }
 
 # One watcher home: state, fakebin, and a config dir that may hold the sorter.
@@ -425,6 +516,9 @@ fm_test_run \
   test_model_unsure_yes_and_malformed_wake \
   test_model_timeout_and_errors_wake \
   test_model_never_asked_without_usable_input \
+  test_systemone_holds_only_a_low_probability \
+  test_systemone_malformed_and_errors_wake \
+  test_api_key_selects_the_shape \
   test_watcher_holds_and_drain_presents_once \
   test_watcher_wakes_on_yes_rule_and_unreachable \
   test_config_absent_is_identical
