@@ -126,7 +126,7 @@ Its initial normal-mode status signal still surfaces through the no-verb path, w
 Fresh stale panes use the same current-state read before trusting the status log, so an active run or a proven busy worker outranks an old captain-relevant status-log line left behind before validation.
 No-change heartbeats are also benign.
 A home that creates `config/status-sorter` adds one step before a status-line wake the watcher is about to deliver outside the away and quiet postures.
-Plain rules decide first, and only routine `working:` lines and steer replies go to the configured decision model with one question: does the supervisor need to act on or learn from this line now.
+Plain rules decide first, and only `working:` lines, steer replies included, go to the configured decision model with one question: does the supervisor need to act on or learn from this line now.
 Decisions, blockers, failures, pauses, finished work, keys, and PR or merge news always wake, and an unsure, unreachable, or malformed model answer wakes too.
 The wake is held only when every new line in it is held; each held line stays in its status log, is recorded in `state/status-sorter-held.log` before any wake marker advances, and reaches main through the drain's `HELD STATUS` section ([`configuration.md`](configuration.md#status-wake-sorter-configstatus-sorter)).
 Separately from heartbeat backoff and wedge handling, the watcher poll runs `bin/fm-inactive-reconcile.sh` on its own bounded cadence, while locked session start sends the same bounded local scan through `bin/fm-startup-network.sh`'s deferred worker so current-state reads never block the digest.

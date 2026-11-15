@@ -11,11 +11,10 @@
 # away or quiet record (state/.afk) exists. Every new line in the batch passes
 # two tiers:
 #   - Rule tier, deterministic and local. A line is a hold candidate only when
-#     its verb is working, or done with a well-formed steer-reply correlation
-#     token (the corr=<16 hex> reply shape bin/fm-pending-reply-lib.sh
-#     recognises). Every other verb wakes: needs-decision, blocked, failed,
-#     paused, captain-held, resolved, note, any other done line, and any
-#     unrecognised prefix. A candidate still wakes when it states a [key=...],
+#     its verb is working, including a steer reply that carries a corr= token.
+#     Every other verb wakes: needs-decision, blocked, failed, paused,
+#     captain-held, resolved, note, every done line, and any unrecognised
+#     prefix. A candidate still wakes when it states a [key=...],
 #     names a child-outcome or child-pr key, names a PR URL or pr= token,
 #     mentions a merge, or matches the classifier's free-text captain tokens.
 #   - Model tier, only for candidates the rules left. One chat-completions
@@ -49,8 +48,7 @@
 # The key is sent as an Authorization bearer header through curl's stdin
 # config, never on a command line.
 #
-# Callers load bin/fm-pending-reply-lib.sh for the steer-reply shape; without it
-# a done line is never a candidate. No side effects on source.
+# No side effects on source.
 
 _FM_STATUS_SORTER_LIB_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd "${d:-/}" && pwd)"
 # shellcheck source=bin/fm-classify-lib.sh
@@ -165,11 +163,15 @@ _fm_status_sorter_captain_tokens() {
 # Rule tier for one status line. 0 when it is a hold candidate for the model
 # tier; 1 when it wakes. FM_STATUS_SORTER_REASON names the rule either way.
 fm_status_sorter_rule() {  # <status-line>
-  local line=$1 unstamped sorter_verb tokens corr
+  local line=$1 unstamped sorter_verb tokens
   _fm_status_unstamped "$line" unstamped
   status_line_verb "$line" sorter_verb
   case "$sorter_verb" in
-    working|done) ;;
+    working) ;;
+    done)
+      FM_STATUS_SORTER_REASON='rule: finished work always wakes'
+      return 1
+      ;;
     *)
       FM_STATUS_SORTER_REASON="rule: verb '${sorter_verb}' always wakes"
       return 1
@@ -194,19 +196,8 @@ fm_status_sorter_rule() {  # <status-line>
     FM_STATUS_SORTER_REASON='rule: a captain token always wakes'
     return 1
   fi
-  if [ "$sorter_verb" = working ]; then
-    FM_STATUS_SORTER_REASON='rule: working line is a candidate'
-    return 0
-  fi
-  if command -v fm_pending_reply_extract_corr >/dev/null 2>&1; then
-    corr=$(fm_pending_reply_extract_corr "$line")
-    if [ -n "$corr" ] && fm_pending_reply_text_has_corr "$line" "$corr"; then
-      FM_STATUS_SORTER_REASON='rule: steer reply is a candidate'
-      return 0
-    fi
-  fi
-  FM_STATUS_SORTER_REASON='rule: finished work always wakes'
-  return 1
+  FM_STATUS_SORTER_REASON='rule: working line is a candidate'
+  return 0
 }
 
 # Start one batch decision.

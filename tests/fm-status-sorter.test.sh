@@ -15,8 +15,6 @@ set -u
 # shellcheck source=tests/watch-triage-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/watch-triage-helpers.sh"
 # shellcheck source=/dev/null
-. "$ROOT/bin/fm-pending-reply-lib.sh"
-# shellcheck source=/dev/null
 . "$ROOT/bin/fm-status-sorter-lib.sh"
 
 TMP_ROOT=$(fm_test_tmproot fm-status-sorter-tests)
@@ -137,11 +135,12 @@ test_rule_tier_table() {
   done <<EOF
 candidate|working: compiling step 2
 candidate|working [at=1700000000]: started the next phase
-candidate|done corr=$CORR: recorded
-candidate|done [corr=$CORR]: re-read done
+candidate|working corr=$CORR: recorded
+candidate|working [corr=$CORR]: re-read done
 wake|done: finished the task
+wake|done corr=$CORR: recorded
+wake|done [corr=$CORR]: finished the migration, tests pass
 wake|done xcorr=$CORR: recorded
-wake|done corr=0123: recorded
 wake|needs-decision: choose between two layouts
 wake|needs-decision [key=layout]: choose between two layouts
 wake|blocked: the build needs a credential
@@ -153,18 +152,18 @@ wake|captain-held: transferred to the captain
 wake|parked: an unknown verb
 wake|working [key=child-pr-alpha]: relayed
 wake|working: saw child-outcome-alpha-done
-wake|done corr=$CORR: child-pr-alpha relayed
+wake|working corr=$CORR: child-pr-alpha relayed
 wake|working: opened https://forge.example.invalid/acme/widget/pull/12
-wake|done corr=$CORR: https://forge.example.invalid/acme/widget/merge_requests/7 is up
+wake|working corr=$CORR: https://forge.example.invalid/acme/widget/merge_requests/7 is up
 wake|working: recorded pr=https://forge.example.invalid/acme/widget/pull/12
 wake|working: merging the base branch
-wake|done corr=$CORR: merged
+wake|working corr=$CORR: merged
 wake|working: PR ready for review
 wake|working: checks green on the branch
 wake|continuation prose without a verb
 EOF
   [ -z "$failures" ] || fail "rule tier disagreed with the table:$failures"
-  pass "rule tier: only working lines and steer-reply done lines are candidates; decisions, blockers, failures, pauses, finished work, keys, and PR or merge news wake"
+  pass "rule tier: only working lines, steer replies included, are candidates; decisions, blockers, failures, pauses, finished work, keys, and PR or merge news wake"
 }
 
 test_model_sure_hold_records_the_reason() {
@@ -172,15 +171,15 @@ test_model_sure_hold_records_the_reason() {
   dir="$TMP_ROOT/model-hold"; cfg="$dir/config"; mkdir -p "$dir"
   port=$(stub_start "$dir")
   write_sorter_config "$cfg" "$port"
-  decide_span "$cfg" mate1 "done corr=$CORR: recorded" \
+  decide_span "$cfg" mate1 "working corr=$CORR: recorded" \
     || fail "a sure no did not hold the line: $FM_STATUS_SORTER_REASON"
-  [ "$FM_STATUS_SORTER_HELD" = "mate1"$'\t'"model"$'\t'"model: no (confidence 0.95)"$'\t'"done corr=$CORR: recorded"$'\n' ] \
+  [ "$FM_STATUS_SORTER_HELD" = "mate1"$'\t'"model"$'\t'"model: no (confidence 0.95)"$'\t'"working corr=$CORR: recorded"$'\n' ] \
     || fail "held row did not carry task, tier, reason, and line: $(printf '%q' "$FM_STATUS_SORTER_HELD")"
   [ "$(stub_requests "$dir")" = 1 ] || fail "a single candidate did not make exactly one request"
   req=$(head -n 1 "$dir/requests.log")
   [ "$(printf '%s' "$req" | jq -r .auth)" = 'Bearer test-key' ] || fail "the key file was not sent as a bearer header: $req"
   [ "$(printf '%s' "$req" | jq -r '.body | fromjson | .model')" = stub-model ] || fail "the configured model was not sent: $req"
-  printf '%s' "$req" | jq -r '.body | fromjson | .messages[-1].content' | grep -F "done corr=$CORR: recorded" >/dev/null \
+  printf '%s' "$req" | jq -r '.body | fromjson | .messages[-1].content' | grep -F "working corr=$CORR: recorded" >/dev/null \
     || fail "the status line was not sent to the model: $req"
 
   stub_mode "$dir" answer $'```json\n{"answer":"No","confidence":1}\n```'
@@ -250,9 +249,12 @@ test_model_never_asked_without_usable_input() {
     || fail "a batch over the candidate limit held its lines"
   ! decide_span "$cfg" mate1 "$(printf 'working: started\nblocked: need a credential')" \
     || fail "a span with a blocker held its lines"
+  ! decide_span "$cfg" mate1 "done corr=$CORR: recorded" \
+    || fail "a steer reply reporting finished work held its line"
+  assert_contains "$FM_STATUS_SORTER_REASON" "finished work" "a done steer reply must wake on the rule tier"
   [ "$(stub_requests "$dir")" = 0 ] || fail "the model was asked without a usable key, config, or candidate set"
   stop_stubs
-  pass "model tier: a missing key, an invalid config, an oversized batch, or a rule wake never reaches the model"
+  pass "model tier: a missing key, an invalid config, an oversized batch, a done steer reply, or a rule wake never reaches the model"
 }
 
 # One watcher home: state, fakebin, and a config dir that may hold the sorter.
@@ -299,7 +301,7 @@ test_watcher_holds_and_drain_presents_once() {
   stub="$dir/stub"; mkdir -p "$stub"
   port=$(stub_start "$stub")
   write_sorter_config "$dir/config" "$port"
-  seed_status "$state" mate1 "done corr=$CORR: recorded"
+  seed_status "$state" mate1 "working corr=$CORR: recorded"
   export FM_FAKE_CREW_STATE='state: unknown · source: none · fake default'
   watch_home "$dir"
   pid=$!
@@ -308,9 +310,9 @@ test_watcher_holds_and_drain_presents_once() {
   reap "$pid"
   [ ! -s "$dir/watch.out" ] || fail "a held line printed a wake reason: $(cat "$dir/watch.out")"
   [ ! -s "$state/.wake-queue" ] || fail "a held line queued a wake row"
-  grep -F "$(printf 'mate1\tmodel\tmodel: no (confidence 0.95)\tdone corr=%s: recorded' "$CORR")" \
+  grep -F "$(printf 'mate1\tmodel\tmodel: no (confidence 0.95)\tworking corr=%s: recorded' "$CORR")" \
     "$state/status-sorter-held.log" >/dev/null || fail "the held log lacks the line, tier, and reason: $(cat "$state/status-sorter-held.log" 2>/dev/null)"
-  tail -n 1 "$state/mate1.status" | grep -Fx "done corr=$CORR: recorded" >/dev/null \
+  tail -n 1 "$state/mate1.status" | grep -Fx "working corr=$CORR: recorded" >/dev/null \
     || fail "holding the wake changed the durable status log"
 
   # The heartbeat backstop must not raise the held line again.
@@ -328,7 +330,7 @@ test_watcher_holds_and_drain_presents_once() {
   out="$dir/drain1.out"
   drain_home "$dir" "$out" || fail "drain failed with a held line"
   grep -F 'HELD STATUS (1 status line(s)' "$out" >/dev/null || fail "the drain printed no HELD STATUS count: $(cat "$out")"
-  grep -F "mate1 done corr=$CORR: recorded [held by model: no (confidence 0.95)]" "$out" >/dev/null \
+  grep -F "mate1 working corr=$CORR: recorded [held by model: no (confidence 0.95)]" "$out" >/dev/null \
     || fail "the drain did not present the held line with its reason: $(cat "$out")"
   out="$dir/drain2.out"
   drain_home "$dir" "$out" || fail "second drain failed"
@@ -338,7 +340,7 @@ test_watcher_holds_and_drain_presents_once() {
   out="$dir/drain3.out"
   drain_home "$dir" "$out" || fail "third drain failed"
   grep -F 'mate2 working: started' "$out" >/dev/null || fail "a later held line was not presented: $(cat "$out")"
-  ! grep -F 'mate1 done' "$out" >/dev/null || fail "an earlier held line was replayed with a later one"
+  ! grep -F 'mate1 working corr' "$out" >/dev/null || fail "an earlier held line was replayed with a later one"
   stop_stubs
   pass "watcher holds a sure-no line without a wake or backstop, and the drain presents it once with count and reason"
 }
@@ -396,7 +398,7 @@ test_config_absent_is_identical() {
   stub_mode "$stub" answer '{"answer":"yes","confidence":0.9}'
   export FM_FAKE_CREW_STATE='state: unknown · source: none · fake default'
   for home in "$off" "$on"; do
-    seed_status "$home/state" mate1 "done corr=$CORR: recorded"
+    seed_status "$home/state" mate1 "working corr=$CORR: recorded"
     watch_home "$home"
     pid=$!
     wait_for_exit "$pid" 100 || fail "the watcher did not wake in $(basename "$home")"

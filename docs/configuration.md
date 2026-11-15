@@ -1073,8 +1073,8 @@ Without it the watcher reads no key, sends no request, writes no held record, an
 
 The sorter runs only on a status-line wake the watcher was about to deliver, and never while the away or quiet record exists.
 Plain rules decide first, with no network.
-A `needs-decision`, `blocked`, `failed`, `paused`, or ordinary `done` line always wakes, as does any line that states a `[key=...]`, names a `child-outcome` or `child-pr` key, names a pull or merge request URL or `pr=` token, mentions a merge, or carries a captain token such as `PR ready`.
-Only `working:` lines and `done:` lines that reply to a steer with a `corr=<16 hex>` token reach the model.
+A `needs-decision`, `blocked`, `failed`, `paused`, or `done` line always wakes, including a `done` steer reply with a `corr=<16 hex>` token, as does any line that states a `[key=...]`, names a `child-outcome` or `child-pr` key, names a pull or merge request URL or `pr=` token, mentions a merge, or carries a captain token such as `PR ready`.
+Only `working:` lines, including steer replies, reach the model.
 For each of those, the watcher sends one chat-completions request asking whether the supervisor needs to act on or learn from the line now, and holds the line only when the answer is `no` at or above `hold_confidence`.
 A `yes`, a `no` below that threshold, a timeout, a connection failure, a non-200 answer, a malformed answer, a missing key, `curl`, or `jq`, an invalid config, or more than four candidate lines in one wake all wake.
 A wake is held only when every new line in it is held.
