@@ -3,9 +3,10 @@
 # optionally acknowledge handled records,
 # annotate every unread line for validated signal status keys, surface unread
 # informational status lines, latest captain-facing statuses not covered by a
-# newer branch outcome, OPEN DECISIONS, captain-call record divergence, and on
-# a supervision-host home the supervision session's new and unprocessed
-# outcomes (BRANCH OUTCOMES), then assert liveness.
+# newer branch outcome, OPEN DECISIONS, captain-call record divergence, for
+# main the status lines the opt-in status sorter held back from waking it
+# (HELD STATUS), and on a supervision-host home the supervision session's new
+# and unprocessed outcomes (BRANCH OUTCOMES), then assert liveness.
 #
 # Keep sequence-bound row consumption independent from generation-bound episode
 # retirement; docs/watcher-continuity.md owns the recovery contract.
@@ -33,6 +34,8 @@ SCRIPT_DIR="$(d=${BASH_SOURCE[0]%/*}; [ "$d" != "${BASH_SOURCE[0]}" ] || d=.; cd
 . "$SCRIPT_DIR/fm-supervision-engine-lib.sh"
 # shellcheck source=bin/fm-afk-contract.sh
 . "$SCRIPT_DIR/fm-afk-contract.sh"
+# shellcheck source=bin/fm-status-sorter-lib.sh
+. "$SCRIPT_DIR/fm-status-sorter-lib.sh"
 
 DRAIN_TMP=
 DRAIN_VIEW_TMP=
@@ -816,6 +819,10 @@ print_status_presentation() {  # [<deduped-raw-rows>]
     fi
   fi
   if [ "$rc" -eq 0 ] && [ -n "$snapshot" ]; then print_status_sections "$snapshot" "$fully_presented" || rc=1; fi
+  # Lines the opt-in status sorter held back from waking main
+  # (bin/fm-status-sorter-lib.sh). Main presents them once; a supervision
+  # branch never consumes them.
+  if [ "$ACTOR" = main ]; then fm_status_sorter_held_section "$STATE" || rc=1; fi
   fm_lock_release "$lock"
   return "$rc"
 }

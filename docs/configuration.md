@@ -11,7 +11,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend) and [harness support](#harness-support) |
 | Worker permissions, accounts, or environment | [Codex approval review](#codex-automatic-approval-review), [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [Codex permission mode](#codex-permission-mode-configcodex-permission-mode), [persistent managed-policy failover](#persistent-managed-policy-failover), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), [several Claude accounts](#several-claude-accounts-configclaude-accounts), [worker tool exclusions](#worker-tool-exclusions-configcrew-exclude-tools), [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist), and its [Orca environment source](#orca-environment-source-configlaunch-env-tmux-session) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), [external memory tiers](#external-memory-tiers-memory-layering-section), [record export](#record-export-configrecord-export-root), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
-| Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), [Codex native Stop park](#codex-native-stop-park-configcodex-stop-park), [warm-cache compaction](#warm-cache-compaction-configwarm-compact), and [Calm preference](#calm-preference-configcalm) |
+| Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), [Codex native Stop park](#codex-native-stop-park-configcodex-stop-park), [warm-cache compaction](#warm-cache-compaction-configwarm-compact), [status-wake sorter](#status-wake-sorter-configstatus-sorter), and [Calm preference](#calm-preference-configcalm) |
 | Persistent secondmates | [Secondmate routes](#secondmate-routes-datasecondmatesmd) and the [remote hc core](#remote-hc-core-confighc-session) |
 | Review bots on owned GitHub pull requests | [Contribution review bots](#contribution-review-bots-configcontribution-review-bots) |
 | Per-run overrides and tuning | [Environment variables](#environment-variables) |
@@ -1063,6 +1063,49 @@ The away-mode daemon has no such deferral of its own.
 With the flag absent the wedge timer spends no current-state read for it and keeps the unchanged escalation schedule, reasons, and `demand-deep-inspection` wording.
 The flag is a home-local supervision-noise preference and is not inherited by secondmate homes.
 [`architecture.md`](architecture.md) owns the deferral contract and `bin/fm-classify-lib.sh`'s `crew_run_is_validating` owns which verdicts count.
+
+## Status-wake sorter (config/status-sorter)
+
+The optional local, gitignored `config/status-sorter` file opts this home into a default-off sorter that keeps routine status lines from waking firstmate.
+Without it the watcher reads no key, sends no request, writes no held record, and wakes exactly as before.
+
+### What it holds
+
+The sorter runs only on a status-line wake the watcher was about to deliver, and never while the away or quiet record exists.
+Plain rules decide first, with no network.
+A `needs-decision`, `blocked`, `failed`, `paused`, or ordinary `done` line always wakes, as does any line that states a `[key=...]`, names a `child-outcome` or `child-pr` key, names a pull or merge request URL or `pr=` token, mentions a merge, or carries a captain token such as `PR ready`.
+Only `working:` lines and `done:` lines that reply to a steer with a `corr=<16 hex>` token reach the model.
+For each of those, the watcher sends one chat-completions request asking whether the supervisor needs to act on or learn from the line now, and holds the line only when the answer is `no` at or above `hold_confidence`.
+A `yes`, a `no` below that threshold, a timeout, a connection failure, a non-200 answer, a malformed answer, a missing key, `curl`, or `jq`, an invalid config, or more than four candidate lines in one wake all wake.
+A wake is held only when every new line in it is held.
+
+### Held lines
+
+A held line stays in its task's status log, and open decision and blocker keys are unaffected because those lines always wake.
+The watcher appends each held line to `state/status-sorter-held.log` with its task, the tier that held it, and the reason, before it advances any wake marker.
+Every main `bin/fm-wake-drain.sh` presentation, heartbeat included, prints a `HELD STATUS` section with the count and the lines held since the last drain, and does not print them again.
+Holding a line adds no wake of its own, so held lines wait for the next drain.
+
+### File format
+
+```text
+endpoint=https://llm.example.invalid/v1/chat/completions
+model=small-model
+key_file=/absolute/path/to/key
+timeout=5
+hold_confidence=0.8
+```
+
+`endpoint` is an `http` or `https` URL that accepts a chat-completions request with `model` and `messages` and returns the answer in `choices[0].message.content`.
+`key_file` is an absolute path whose first line is sent as a bearer token; keep it outside the repository and readable only by you.
+`timeout` is whole seconds from 1 to 30, defaults to 5, and bounds each request.
+`hold_confidence` is a decimal from 0.5 to 1 and defaults to 0.8.
+Blank lines and `#` comments are skipped.
+An unknown key or a bad value makes the config invalid: the watcher prints one warning to its error output and wakes every candidate.
+The endpoint receives the status line text, so choose one you trust with your workers' status lines.
+
+The file is home-local and not inherited by secondmate homes.
+`bin/fm-status-sorter-lib.sh` owns the rules, the request, and the held-log format, and `bin/fm-watch.sh`'s `signal_batch_held` owns where the watcher consults it.
 
 ## Spawn base from the primary checkout (config/spawn-base-primary-checkout)
 

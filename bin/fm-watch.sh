@@ -274,6 +274,11 @@ WATCH_HOME_EXISTED=0
 # cheap when no records exist and never scrapes secondmate conversation.
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
+# Opt-in status-wake sorter (config/status-sorter): its rule and model tiers,
+# config, and held-line log. It reads the steer-reply shape from the
+# pending-reply library above; signal_batch_held is its only caller here.
+# shellcheck source=bin/fm-status-sorter-lib.sh
+. "$SCRIPT_DIR/fm-status-sorter-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # Steering-inbox loss detection: bin/fm-task-inbox-lib.sh owns the record,
@@ -3327,6 +3332,77 @@ signal_files_actionable() {  # <status-file> ...
   return "$found"
 }
 
+# Opt-in status-wake sorter for a signal batch the triage above decided to
+# surface (bin/fm-status-sorter-lib.sh owns the tiers, config, and held log).
+# 0 when every new line of every status file in the batch was held: the held
+# log is appended first, then the batch's markers advance exactly as the
+# surfacing path advances them, so neither the next scan nor the heartbeat
+# backstop raises the held lines again. 1 surfaces the batch unchanged. With
+# config/status-sorter absent this returns 1 before any other read. A batch
+# naming a turn-ended file, a decision-owned file, or a span that could not be
+# classified is never held.
+STATUS_SORTER_CONFIG_WARNED=0
+signal_batch_held() {  # <pending-rows>
+  local pending=$1 sf sig f files='' ef eend eident end ident start span task commit_error
+  fm_status_sorter_enabled "$CONFIG" || return 1
+  case "$FM_SIGNAL_NEEDS_DECISION_FILES" in *[![:space:]]*) return 1 ;; esac
+  while IFS=$'\t' read -r sf sig f; do
+    [ -n "$sf" ] || continue
+    case "$f" in *.status) ;; *) return 1 ;; esac
+    case " $files " in *" $f "*) ;; *) files="$files $f" ;; esac
+  done <<EOF
+$pending
+EOF
+  [ -n "$files" ] || return 1
+  fm_status_sorter_begin
+  for f in $files; do
+    end=''; ident=''
+    while IFS=$'\t' read -r ef eend eident; do
+      [ "$ef" = "$f" ] || continue
+      end=$eend; ident=$eident
+    done <<EOF
+$FM_SIGNAL_SURFACE_ENDPOINTS
+EOF
+    case "$end" in ''|*[!0-9]*) return 1 ;; esac
+    start=$(fm_wake_signal_seen_size "$STATE" "$f")
+    case "$start" in ''|*[!0-9]*) start=0 ;; esac
+    [ "$start" -le "$end" ] || start=0
+    [ "$start" -lt "$end" ] || return 1
+    [ "$(_fm_open_decisions_file_ident "$f")" = "$ident" ] || return 1
+    span=$(_fm_status_read_span "$f" "$start" "$((end - start))") || return 1
+    task=$(basename "$f"); task="${task%.status}"
+    fm_status_sorter_add_span "$task" "$span" || return 1
+  done
+  if ! fm_status_sorter_decide "$CONFIG"; then
+    if [ -n "$FM_STATUS_SORTER_CONFIG_ERROR" ] && [ "$STATUS_SORTER_CONFIG_WARNED" -eq 0 ]; then
+      printf 'watcher: status sorter config invalid, every candidate wakes: %s\n' \
+        "$FM_STATUS_SORTER_CONFIG_ERROR" >&2
+      STATUS_SORTER_CONFIG_WARNED=1
+    fi
+    return 1
+  fi
+  # The held log is the durable record, so it is written first. A classified
+  # position that cannot be committed would re-raise the same lines on the next
+  # scan, so that failure surfaces the batch instead, as the absorb path does.
+  fm_status_sorter_record_held "$STATE" || return 1
+  while IFS=$'\t' read -r sf sig f; do
+    [ -n "$sf" ] || continue
+    fm_wake_status_reported_commit "$STATE" "$f" "$sig" || true
+    mark_surface_reported "$f" "$sig" || true
+  done <<EOF
+$pending
+EOF
+  commit_error=0
+  while IFS=$'\t' read -r f end ident; do
+    [ -n "$f" ] || continue
+    fm_wake_status_seen_commit "$STATE" "$f" "$end" "$ident" || commit_error=1
+    mark_surfaced "$f" "$end" "$ident"
+  done <<EOF
+$FM_SIGNAL_SURFACE_ENDPOINTS
+EOF
+  [ "$commit_error" -eq 0 ]
+}
+
 # Surfaced-marker bookkeeping for the heartbeat backstop is owned by
 # fm-push-transition-lib.sh because push and poll paths must write one format.
 # Mark each actionable status log through the endpoint captured by the heartbeat
@@ -4218,6 +4294,16 @@ EOF
     # shellcheck disable=SC2086  # same space-separated status-path list
     if afk_present || [ "$signal_actionable" -eq 0 ] \
       || { ! signal_crew_provably_working $files && ! signal_turnend_panes_churned $files; }; then
+      signal_route=surface
+      # The opt-in status sorter may hold a batch the triage would surface, but
+      # never under the away or quiet record, whose daemon owns triage.
+      if ! afk_present && signal_batch_held "$pending"; then
+        signal_route=held
+      fi
+    else
+      signal_route=absorb
+    fi
+    if [ "$signal_route" = surface ]; then
       while IFS=$(printf '\t') read -r sf sig f; do
         [ -n "$sf" ] || continue
         file_reason="$reason"
@@ -4251,7 +4337,7 @@ EOF
 $FM_SIGNAL_SURFACE_ENDPOINTS
 EOF
       wake "$reason"
-    else
+    elif [ "$signal_route" = absorb ]; then
       while IFS=$(printf '\t') read -r sf sig f; do
         [ -n "$sf" ] || continue
         case "$f" in *.status) ;; *) printf '%s' "$sig" > "$sf" ;; esac
@@ -4276,6 +4362,8 @@ EOF
         wake "$reason"
       fi
       triage_log "absorbed benign $reason"
+    else
+      triage_log "held $reason (status sorter)"
     fi
   fi
 
