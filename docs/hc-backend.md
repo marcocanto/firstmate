@@ -112,6 +112,7 @@ An input, capture, or close that carries the task label refuses a terminal whose
 | Current path | `hc get`, the foreground process's `cwd` |
 | Busy state | `hc get`, native `status.state` (`working` is busy) |
 | Agent state | `hc get`, the foreground process and its process group, through the shared classifier |
+| Hide or show in the app | `hc get`, then one `hc label` moving the `herdr.*` presentation labels to or from `firstmate.parked.*` |
 | Close | `hc kill`, then `hc rm`, then `hc get` must answer not found |
 
 `bin/fm-control.sh <id> exit` and `relaunch` are supported for ship and scout tasks in a surviving, positively classified local terminal.
